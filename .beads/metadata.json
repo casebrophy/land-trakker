@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "land_trakker",
+  "project_id": "4366a294-b9d0-4699-a079-3205fef8ba5d"
+}
