@@ -126,6 +126,27 @@ type PriceChange struct {
 	SnapshotID *int64
 }
 
+// ParseAttemptOutcome is the result of a single parse attempt.
+type ParseAttemptOutcome string
+
+const (
+	OutcomeSuccess     ParseAttemptOutcome = "success"
+	OutcomePartial     ParseAttemptOutcome = "partial"
+	OutcomeParserError ParseAttemptOutcome = "parser_error"
+	OutcomeUnparseable ParseAttemptOutcome = "unparseable"
+)
+
+// ParseAttempt records a single attempt to parse a raw fetch.
+type ParseAttempt struct {
+	ID            int64
+	RawFetchID    int64
+	ParserVersion string
+	AttemptedAt   time.Time
+	Outcome       ParseAttemptOutcome
+	ErrorMessage  *string
+	SnapshotID    *int64
+}
+
 // Storer defines the persistence contract for listing-domain objects.
 // Implementations live in storage/listingdb.
 type Storer interface {
@@ -142,4 +163,8 @@ type Storer interface {
 	// Price-change operations
 	CreatePriceChange(ctx context.Context, pc PriceChange) (PriceChange, error)
 	QueryPriceChangesByListing(ctx context.Context, listingID string) ([]PriceChange, error)
+
+	// ParseAttempt operations
+	CreateParseAttempt(ctx context.Context, pa ParseAttempt) (ParseAttempt, error)
+	QueryEligibleRawFetchIDs(ctx context.Context, sourceID string, parserVersion string) ([]int64, error)
 }

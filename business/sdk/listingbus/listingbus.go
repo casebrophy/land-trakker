@@ -146,6 +146,15 @@ func (c *Core) UpsertFromParsed(ctx context.Context, pl scraper.ParsedListing, r
 	return existing, createdSnap, nil
 }
 
+// RecordParseAttempt writes a parse_attempts row for a completed parse call.
+func (c *Core) RecordParseAttempt(ctx context.Context, pa listing.ParseAttempt) (listing.ParseAttempt, error) {
+	created, err := c.storer.CreateParseAttempt(ctx, pa)
+	if err != nil {
+		return listing.ParseAttempt{}, fmt.Errorf("recording parse attempt: %w", err)
+	}
+	return created, nil
+}
+
 // ApplyMissedRun increments consecutive_misses and applies health-gated status transitions
 // for a listing absent from a discovery run.
 func (c *Core) ApplyMissedRun(ctx context.Context, listingID string, cfg MissedRunConfig, runHealthy bool, now time.Time) (listing.Listing, error) {

@@ -221,6 +221,55 @@ func (s *Store) QueryPriceChangesByListing(ctx context.Context, listingID string
 	return out, nil
 }
 
+func (s *Store) CreateParseAttempt(ctx context.Context, pa listing.ParseAttempt) (listing.ParseAttempt, error) {
+	row, err := s.queries.CreateParseAttempt(ctx, db.CreateParseAttemptParams{
+		RawFetchID:    pa.RawFetchID,
+		ParserVersion: pa.ParserVersion,
+		AttemptedAt:   timeToTZ(pa.AttemptedAt),
+		Outcome:       string(pa.Outcome),
+		ErrorMessage:  strPtrToText(pa.ErrorMessage),
+		SnapshotID:    int64PtrToInt8(pa.SnapshotID),
+	})
+	if err != nil {
+		return listing.ParseAttempt{}, fmt.Errorf("listingdb.CreateParseAttempt: %w", err)
+	}
+	return rowToParseAttempt(row), nil
+}
+
+func (s *Store) QueryEligibleRawFetchIDs(ctx context.Context, sourceID string, parserVersion string) ([]int64, error) {
+	const q = `
+		SELECT rf.id
+		FROM raw_fetches rf
+		LEFT JOIN LATERAL (
+			SELECT parser_version, outcome
+			FROM parse_attempts
+			WHERE raw_fetch_id = rf.id
+			ORDER BY attempted_at DESC
+			LIMIT 1
+		) latest ON true
+		WHERE rf.source_id = $1
+		  AND (
+		        latest.parser_version IS NULL
+		     OR latest.outcome = 'parser_error'
+		     OR (latest.outcome IN ('success','partial')
+		         AND latest.parser_version <> $2)
+		  )`
+	rows, err := s.pool.Query(ctx, q, sourceID, parserVersion)
+	if err != nil {
+		return nil, fmt.Errorf("listingdb.QueryEligibleRawFetchIDs: %w", err)
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("listingdb.QueryEligibleRawFetchIDs: scan: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // -- row conversion helpers --
 
 func createRowToListing(r db.CreateListingRow) (listing.Listing, error) {
@@ -395,6 +444,18 @@ func rowToSnapshot(r db.ListingSnapshot) (listing.ListingSnapshot, error) {
 		StructuredAttrs: structuredAttrs,
 		Diff:            diff,
 	}, nil
+}
+
+func rowToParseAttempt(r db.ParseAttempt) listing.ParseAttempt {
+	return listing.ParseAttempt{
+		ID:            r.ID,
+		RawFetchID:    r.RawFetchID,
+		ParserVersion: r.ParserVersion,
+		AttemptedAt:   r.AttemptedAt.Time,
+		Outcome:       listing.ParseAttemptOutcome(r.Outcome),
+		ErrorMessage:  textToStrPtr(r.ErrorMessage),
+		SnapshotID:    int8ToInt64Ptr(r.SnapshotID),
+	}
 }
 
 func rowToPriceChange(r db.PriceChange) listing.PriceChange {
