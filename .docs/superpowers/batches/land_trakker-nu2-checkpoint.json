@@ -256,8 +256,20 @@
     },
     {
       "id": "land_trakker-nu2.16",
-      "status": "pending",
-      "model": "claude-sonnet-4-6"
+      "status": "done",
+      "model": "claude-sonnet-4-6",
+      "commit": "3af725b",
+      "test_packages": [
+        "./foundation/web/..."
+      ],
+      "external_surface_added": [
+        "web.ListingsQuerier",
+        "web.ListingsHandler",
+        "web.ListingDetailHandler",
+        "listingbus.Core.QueryListings",
+        "listingbus.Core.QuerySnapshotsByListing",
+        "listingbus.Core.QueryPriceChangesByListing"
+      ]
     },
     {
       "id": "land_trakker-nu2.17",
