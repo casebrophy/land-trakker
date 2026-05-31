@@ -125,3 +125,8 @@ SELECT id, listing_id, changed_at, old_price_cents, new_price_cents, delta_cents
 FROM price_changes
 WHERE listing_id = @listing_id::uuid
 ORDER BY changed_at DESC;
+
+-- name: CreateParseAttempt :one
+INSERT INTO parse_attempts (raw_fetch_id, parser_version, attempted_at, outcome, error_message, snapshot_id)
+VALUES (@raw_fetch_id, @parser_version, @attempted_at, @outcome, sqlc.narg('error_message'), sqlc.narg('snapshot_id'))
+RETURNING *;

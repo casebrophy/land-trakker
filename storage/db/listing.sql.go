@@ -262,6 +262,43 @@ func (q *Queries) CreateListingSnapshot(ctx context.Context, arg CreateListingSn
 	return i, err
 }
 
+const createParseAttempt = `-- name: CreateParseAttempt :one
+INSERT INTO parse_attempts (raw_fetch_id, parser_version, attempted_at, outcome, error_message, snapshot_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, raw_fetch_id, parser_version, attempted_at, outcome, error_message, snapshot_id
+`
+
+type CreateParseAttemptParams struct {
+	RawFetchID    int64
+	ParserVersion string
+	AttemptedAt   pgtype.Timestamptz
+	Outcome       string
+	ErrorMessage  pgtype.Text
+	SnapshotID    pgtype.Int8
+}
+
+func (q *Queries) CreateParseAttempt(ctx context.Context, arg CreateParseAttemptParams) (ParseAttempt, error) {
+	row := q.db.QueryRow(ctx, createParseAttempt,
+		arg.RawFetchID,
+		arg.ParserVersion,
+		arg.AttemptedAt,
+		arg.Outcome,
+		arg.ErrorMessage,
+		arg.SnapshotID,
+	)
+	var i ParseAttempt
+	err := row.Scan(
+		&i.ID,
+		&i.RawFetchID,
+		&i.ParserVersion,
+		&i.AttemptedAt,
+		&i.Outcome,
+		&i.ErrorMessage,
+		&i.SnapshotID,
+	)
+	return i, err
+}
+
 const createPriceChange = `-- name: CreatePriceChange :one
 INSERT INTO price_changes (
     listing_id, changed_at, old_price_cents, new_price_cents, snapshot_id

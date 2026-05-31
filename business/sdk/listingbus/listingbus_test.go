@@ -19,12 +19,15 @@ import (
 // =============================================================================
 
 type fakeStore struct {
-	listings     map[string]listing.Listing       // id → listing
-	bySource     map[string]string                 // "sourceID:sourceListingID" → id
-	snapshots    map[string][]listing.ListingSnapshot // listingID → snaps (DESC)
-	priceChanges []listing.PriceChange
-	nextSnapID   int64
-	nextListSeq  int
+	listings      map[string]listing.Listing          // id → listing
+	bySource      map[string]string                    // "sourceID:sourceListingID" → id
+	snapshots     map[string][]listing.ListingSnapshot // listingID → snaps (DESC)
+	priceChanges  []listing.PriceChange
+	parseAttempts []listing.ParseAttempt
+	nextSnapID    int64
+	nextListSeq   int
+	nextPAID      int64
+	eligibleIDs   []int64
 }
 
 func newFakeStore() *fakeStore {
@@ -106,6 +109,17 @@ func (f *fakeStore) QueryPriceChangesByListing(_ context.Context, listingID stri
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeStore) CreateParseAttempt(_ context.Context, pa listing.ParseAttempt) (listing.ParseAttempt, error) {
+	f.nextPAID++
+	pa.ID = f.nextPAID
+	f.parseAttempts = append(f.parseAttempts, pa)
+	return pa, nil
+}
+
+func (f *fakeStore) QueryEligibleRawFetchIDs(_ context.Context, _, _ string) ([]int64, error) {
+	return f.eligibleIDs, nil
 }
 
 func itoa(n int) string {
@@ -409,5 +423,35 @@ func TestApplyMissedRun_TerminalStateUnchanged(t *testing.T) {
 	}
 	if got.Status != listing.StatusConfirmedSold {
 		t.Errorf("want StatusConfirmedSold unchanged, got %q", got.Status)
+	}
+}
+
+// =============================================================================
+// RecordParseAttempt tests
+// =============================================================================
+
+func TestRecordParseAttempt(t *testing.T) {
+	fs := newFakeStore()
+	core := newCore(fs)
+	ctx := context.Background()
+
+	pa := listing.ParseAttempt{
+		RawFetchID:    42,
+		ParserVersion: "landwatch.v1",
+		AttemptedAt:   time.Now().UTC(),
+		Outcome:       listing.OutcomeSuccess,
+	}
+	got, err := core.RecordParseAttempt(ctx, pa)
+	if err != nil {
+		t.Fatalf("RecordParseAttempt: %v", err)
+	}
+	if got.ID == 0 {
+		t.Error("expected non-zero ID")
+	}
+	if got.RawFetchID != 42 {
+		t.Errorf("RawFetchID = %d, want 42", got.RawFetchID)
+	}
+	if len(fs.parseAttempts) != 1 {
+		t.Errorf("expected 1 stored parse attempt, got %d", len(fs.parseAttempts))
 	}
 }
