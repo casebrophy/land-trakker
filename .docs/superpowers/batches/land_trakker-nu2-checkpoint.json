@@ -246,8 +246,13 @@
     },
     {
       "id": "land_trakker-nu2.14",
-      "status": "pending",
-      "model": "claude-haiku-4-5-20251001"
+      "status": "done",
+      "model": "claude-haiku-4-5-20251001",
+      "commit": "fdf8a25",
+      "test_packages": [
+        "./cmd/scrape-once/..."
+      ],
+      "external_surface_added": []
     },
     {
       "id": "land_trakker-nu2.16",
