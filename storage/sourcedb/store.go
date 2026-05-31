@@ -346,3 +346,5 @@ func strToUUID(s string) pgtype.UUID {
 	_ = u.Scan(s)
 	return u
 }
+
+var _ source.Storer = (*Store)(nil)

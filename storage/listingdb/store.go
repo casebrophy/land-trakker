@@ -557,3 +557,5 @@ func jsonUnmarshal(b []byte) (map[string]any, error) {
 	}
 	return m, nil
 }
+
+var _ listing.Storer = (*Store)(nil)
