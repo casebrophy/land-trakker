@@ -122,6 +122,21 @@ func (f *fakeStore) QueryEligibleRawFetchIDs(_ context.Context, _, _ string) ([]
 	return f.eligibleIDs, nil
 }
 
+func (f *fakeStore) QueryListings(_ context.Context, limit, offset int) ([]listing.Listing, error) {
+	all := make([]listing.Listing, 0, len(f.listings))
+	for _, l := range f.listings {
+		all = append(all, l)
+	}
+	if offset >= len(all) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(all) {
+		end = len(all)
+	}
+	return all[offset:end], nil
+}
+
 func itoa(n int) string {
 	return string(rune('0' + n)) // simple for tests (works up to 9)
 }
