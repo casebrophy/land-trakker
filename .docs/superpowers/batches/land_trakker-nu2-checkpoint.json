@@ -185,8 +185,21 @@
     },
     {
       "id": "land_trakker-nu2.9",
-      "status": "pending",
-      "model": "claude-sonnet-4-6"
+      "status": "done",
+      "model": "claude-sonnet-4-6",
+      "commit": "2aacac3",
+      "test_packages": [
+        "./business/sdk/listingbus/...",
+        "./business/sdk/sourcebus/..."
+      ],
+      "external_surface_added": [
+        "listingbus.Core",
+        "listingbus.NewCore",
+        "listingbus.MissedRunConfig",
+        "sourcebus.Core",
+        "sourcebus.NewCore",
+        "sourcebus.IsRunHealthy"
+      ]
     },
     {
       "id": "land_trakker-nu2.10",
