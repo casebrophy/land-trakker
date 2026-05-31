@@ -273,8 +273,14 @@
     },
     {
       "id": "land_trakker-nu2.17",
-      "status": "pending",
-      "model": "claude-sonnet-4-6"
+      "status": "done",
+      "model": "claude-sonnet-4-6",
+      "commit": "49a3a82",
+      "test_packages": [
+        "./cmd/backfill/...",
+        "./foundation/scraper/..."
+      ],
+      "external_surface_added": []
     }
   ]
 }
