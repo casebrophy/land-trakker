@@ -218,8 +218,21 @@
     },
     {
       "id": "land_trakker-nu2.11",
-      "status": "pending",
-      "model": "claude-sonnet-4-6"
+      "status": "done",
+      "model": "claude-sonnet-4-6",
+      "commit": "aa7e812",
+      "test_packages": [
+        "./foundation/scraper/..."
+      ],
+      "external_surface_added": [
+        "scraper.DiffRefs",
+        "scraper.Orchestrator",
+        "scraper.NewOrchestrator",
+        "scraper.MissedRunHandler",
+        "scraper.RunResult",
+        "sourcebus.Core.QueryLatestRun",
+        "listingbus.Core.QueryListingBySource"
+      ]
     },
     {
       "id": "land_trakker-nu2.13",
