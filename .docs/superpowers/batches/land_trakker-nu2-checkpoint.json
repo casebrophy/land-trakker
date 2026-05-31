@@ -47,12 +47,27 @@
       "external_surface_added": [
         "config.Config",
         "config.Load"
-      ]
+      ],
+      "fixup": "restored gitignored testdata fixture + anchored gitignore"
     },
     {
       "id": "land_trakker-nu2.15",
-      "status": "pending",
-      "model": "claude-sonnet-4-6"
+      "status": "done",
+      "model": "claude-sonnet-4-6",
+      "commit": "9a9315d",
+      "test_packages": [
+        "./foundation/web/...",
+        "./cmd/api/..."
+      ],
+      "external_surface_added": [
+        "web.SetSession",
+        "web.ClearSession",
+        "web.IsAuthenticated",
+        "web.RequireAuth",
+        "web.LoginHandler",
+        "web.LogoutHandler",
+        "web.HealthHandler"
+      ]
     },
     {
       "id": "land_trakker-nu2.3",
