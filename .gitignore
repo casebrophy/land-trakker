@@ -3,3 +3,20 @@
 .dolt/
 *.db
 .beads-credential-key
+
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/bin/
+/land_trakker
+
+# Generated sqlc output
+/storage/db/
+
+# Config (contains secrets)
+land_trakker.toml
