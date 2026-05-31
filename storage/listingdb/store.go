@@ -236,6 +236,78 @@ func (s *Store) CreateParseAttempt(ctx context.Context, pa listing.ParseAttempt)
 	return rowToParseAttempt(row), nil
 }
 
+func (s *Store) QueryListings(ctx context.Context, limit, offset int) ([]listing.Listing, error) {
+	const q = `
+		SELECT
+		    id, source_id, source_listing_id, url, first_seen_at, last_seen_at,
+		    status, consecutive_misses, dismissed, dismissed_reason, saved,
+		    title, description, price_cents, acres, price_per_acre_cents,
+		    address_line, city, county, state, postal_code,
+		    ST_AsText(geom) AS geom_wkt,
+		    photos, broker_name, broker_phone, broker_email, posted_at, source_updated_at,
+		    attr_water_frontage, attr_off_grid, attr_road_access, attr_power, attr_well, attr_septic,
+		    attr_property_type, attrs_extra, attrs_extraction
+		FROM listings
+		ORDER BY first_seen_at DESC
+		LIMIT $1 OFFSET $2`
+	rows, err := s.pool.Query(ctx, q, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("listingdb.QueryListings: %w", err)
+	}
+	defer rows.Close()
+	var out []listing.Listing
+	for rows.Next() {
+		var r db.GetListingByIDRow
+		if err := rows.Scan(
+			&r.ID,
+			&r.SourceID,
+			&r.SourceListingID,
+			&r.Url,
+			&r.FirstSeenAt,
+			&r.LastSeenAt,
+			&r.Status,
+			&r.ConsecutiveMisses,
+			&r.Dismissed,
+			&r.DismissedReason,
+			&r.Saved,
+			&r.Title,
+			&r.Description,
+			&r.PriceCents,
+			&r.Acres,
+			&r.PricePerAcreCents,
+			&r.AddressLine,
+			&r.City,
+			&r.County,
+			&r.State,
+			&r.PostalCode,
+			&r.GeomWkt,
+			&r.Photos,
+			&r.BrokerName,
+			&r.BrokerPhone,
+			&r.BrokerEmail,
+			&r.PostedAt,
+			&r.SourceUpdatedAt,
+			&r.AttrWaterFrontage,
+			&r.AttrOffGrid,
+			&r.AttrRoadAccess,
+			&r.AttrPower,
+			&r.AttrWell,
+			&r.AttrSeptic,
+			&r.AttrPropertyType,
+			&r.AttrsExtra,
+			&r.AttrsExtraction,
+		); err != nil {
+			return nil, fmt.Errorf("listingdb.QueryListings: scan: %w", err)
+		}
+		l, err := getByIDRowToListing(r)
+		if err != nil {
+			return nil, fmt.Errorf("listingdb.QueryListings: convert: %w", err)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
 func (s *Store) QueryEligibleRawFetchIDs(ctx context.Context, sourceID string, parserVersion string) ([]int64, error) {
 	const q = `
 		SELECT rf.id

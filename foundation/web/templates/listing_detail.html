@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Land Trakker — Listing Detail</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-white shadow mb-6">
+        <div class="max-w-4xl mx-auto px-4 py-3 flex items-center justify-between">
+            <span class="text-xl font-bold text-blue-700">Land Trakker</span>
+            <a href="/logout" class="text-sm text-gray-600 hover:text-red-600">Logout</a>
+        </div>
+    </nav>
+    <div class="max-w-4xl mx-auto px-4">
+        <a href="/" class="text-sm text-blue-600 hover:underline mb-4 inline-block">&larr; Back to listings</a>
+
+        <div class="bg-white rounded shadow p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">{{.Title}}</h2>
+            <dl class="grid grid-cols-2 gap-3 text-sm">
+                <div><dt class="font-medium text-gray-500">Status</dt><dd>{{.Status}}</dd></div>
+                <div><dt class="font-medium text-gray-500">Price</dt><dd>{{.Price}}</dd></div>
+                <div><dt class="font-medium text-gray-500">Acres</dt><dd>{{.Acres}}</dd></div>
+                <div><dt class="font-medium text-gray-500">Address</dt><dd>{{.Address}}</dd></div>
+                <div class="col-span-2"><dt class="font-medium text-gray-500">URL</dt><dd><a href="{{.URL}}" class="text-blue-600 hover:underline break-all" target="_blank">{{.URL}}</a></dd></div>
+            </dl>
+        </div>
+
+        <h3 class="text-lg font-semibold mb-3">Snapshot History</h3>
+        <div class="overflow-x-auto bg-white rounded shadow">
+            <table class="min-w-full text-sm">
+                <thead class="bg-gray-50 border-b">
+                    <tr>
+                        <th class="px-4 py-2 text-left font-medium text-gray-600">Captured At</th>
+                        <th class="px-4 py-2 text-left font-medium text-gray-600">Status</th>
+                        <th class="px-4 py-2 text-left font-medium text-gray-600">Price</th>
+                        <th class="px-4 py-2 text-left font-medium text-gray-600">Acres</th>
+                        <th class="px-4 py-2 text-left font-medium text-gray-600">Changes</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100">
+                    {{range .Snaps}}
+                    <tr class="hover:bg-gray-50">
+                        <td class="px-4 py-2">{{.CapturedAt}}</td>
+                        <td class="px-4 py-2">{{.Status}}</td>
+                        <td class="px-4 py-2">{{.Price}}</td>
+                        <td class="px-4 py-2">{{.Acres}}</td>
+                        <td class="px-4 py-2 text-gray-500">{{.Diff}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</body>
+</html>
