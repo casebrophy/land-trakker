@@ -19,4 +19,4 @@
 /storage/db/
 
 # Config (contains secrets)
-land_trakker.toml
+/land_trakker.toml

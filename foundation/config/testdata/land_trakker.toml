@@ -1,0 +1,30 @@
+[server]
+listen = ":8080"
+admin_password_hash = "$2a$12$test_hash_here"
+session_secret = "test_session_secret_key"
+
+[database]
+url = "postgres://user:pass@localhost:5432/land_trakker?sslmode=disable"
+
+[geocoding]
+provider = "mapbox"
+api_key = "pk.test.token"
+daily_request_limit = 5000
+
+[llm]
+enabled = true
+api_key = "sk-ant-test-key"
+model = "claude-3-sonnet-20250514"
+daily_call_limit = 100
+monthly_call_limit = 5000
+
+[scraper]
+default_user_agent = "land-trakker/1.0"
+default_rate_limit_ms = 1000
+default_concurrency = 4
+
+[backup]
+daily_dir = "/var/backups/daily"
+retention_daily = 14
+retention_weekly = 8
+retention_monthly = 12
