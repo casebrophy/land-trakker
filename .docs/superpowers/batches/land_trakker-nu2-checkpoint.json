@@ -81,8 +81,31 @@
     },
     {
       "id": "land_trakker-nu2.4",
-      "status": "pending",
-      "model": "claude-sonnet-4-6"
+      "status": "done",
+      "model": "claude-sonnet-4-6",
+      "commit": "eac259c",
+      "test_packages": [
+        "./business/domain/..."
+      ],
+      "external_surface_added": [
+        "source.Source",
+        "source.ScrapeRun",
+        "source.RawFetch",
+        "source.RunStatus",
+        "source.Storer",
+        "listing.ListingStatus",
+        "listing.StatusActive",
+        "listing.StatusStale",
+        "listing.StatusPresumedInactive",
+        "listing.StatusConfirmedSold",
+        "listing.StatusWithdrawn",
+        "listing.AllStatuses",
+        "listing.Point",
+        "listing.Listing",
+        "listing.ListingSnapshot",
+        "listing.PriceChange",
+        "listing.Storer"
+      ]
     },
     {
       "id": "land_trakker-nu2.5",
