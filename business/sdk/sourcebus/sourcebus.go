@@ -86,6 +86,19 @@ func (c *Core) CreateRawFetch(ctx context.Context, rf source.RawFetch) (source.R
 	return created, nil
 }
 
+// QueryLatestRun retrieves the most recent scrape run for a source, or nil if
+// no runs exist.
+func (c *Core) QueryLatestRun(ctx context.Context, sourceID string) (*source.ScrapeRun, error) {
+	runs, err := c.storer.QueryRunsBySource(ctx, sourceID, 1)
+	if err != nil {
+		return nil, fmt.Errorf("querying latest run: %w", err)
+	}
+	if len(runs) == 0 {
+		return nil, nil
+	}
+	return &runs[0], nil
+}
+
 // QueryRawFetchesByListing retrieves all raw fetches for a given source listing.
 func (c *Core) QueryRawFetchesByListing(ctx context.Context, sourceID, sourceListingID string) ([]source.RawFetch, error) {
 	fetches, err := c.storer.QueryRawFetchesByListing(ctx, sourceID, sourceListingID)
