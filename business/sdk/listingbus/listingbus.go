@@ -146,6 +146,15 @@ func (c *Core) UpsertFromParsed(ctx context.Context, pl scraper.ParsedListing, r
 	return existing, createdSnap, nil
 }
 
+// QueryListingBySource retrieves a canonical listing by its source-specific ID.
+func (c *Core) QueryListingBySource(ctx context.Context, sourceID, sourceListingID string) (listing.Listing, error) {
+	l, err := c.storer.QueryListingBySource(ctx, sourceID, sourceListingID)
+	if err != nil {
+		return listing.Listing{}, fmt.Errorf("querying listing by source: %w", err)
+	}
+	return l, nil
+}
+
 // RecordParseAttempt writes a parse_attempts row for a completed parse call.
 func (c *Core) RecordParseAttempt(ctx context.Context, pa listing.ParseAttempt) (listing.ParseAttempt, error) {
 	created, err := c.storer.CreateParseAttempt(ctx, pa)
