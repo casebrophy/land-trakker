@@ -155,6 +155,7 @@ type Storer interface {
 	UpdateListing(ctx context.Context, l Listing) error
 	QueryListingByID(ctx context.Context, id string) (Listing, error)
 	QueryListingBySource(ctx context.Context, sourceID, sourceListingID string) (Listing, error)
+	QueryListings(ctx context.Context, limit, offset int) ([]Listing, error)
 
 	// Snapshot operations
 	CreateSnapshot(ctx context.Context, snap ListingSnapshot) (ListingSnapshot, error)

@@ -146,6 +146,42 @@ func (c *Core) UpsertFromParsed(ctx context.Context, pl scraper.ParsedListing, r
 	return existing, createdSnap, nil
 }
 
+// QueryListings returns a paginated list of all listings ordered by first_seen_at DESC.
+func (c *Core) QueryListings(ctx context.Context, limit, offset int) ([]listing.Listing, error) {
+	ls, err := c.storer.QueryListings(ctx, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("querying listings: %w", err)
+	}
+	return ls, nil
+}
+
+// QueryListingByID retrieves a canonical listing by its UUID.
+func (c *Core) QueryListingByID(ctx context.Context, id string) (listing.Listing, error) {
+	l, err := c.storer.QueryListingByID(ctx, id)
+	if err != nil {
+		return listing.Listing{}, fmt.Errorf("querying listing by id: %w", err)
+	}
+	return l, nil
+}
+
+// QuerySnapshotsByListing returns all snapshots for a listing ordered by captured_at DESC.
+func (c *Core) QuerySnapshotsByListing(ctx context.Context, listingID string) ([]listing.ListingSnapshot, error) {
+	snaps, err := c.storer.QuerySnapshotsByListing(ctx, listingID)
+	if err != nil {
+		return nil, fmt.Errorf("querying snapshots by listing: %w", err)
+	}
+	return snaps, nil
+}
+
+// QueryPriceChangesByListing returns all price changes for a listing ordered by changed_at DESC.
+func (c *Core) QueryPriceChangesByListing(ctx context.Context, listingID string) ([]listing.PriceChange, error) {
+	pcs, err := c.storer.QueryPriceChangesByListing(ctx, listingID)
+	if err != nil {
+		return nil, fmt.Errorf("querying price changes by listing: %w", err)
+	}
+	return pcs, nil
+}
+
 // QueryListingBySource retrieves a canonical listing by its source-specific ID.
 func (c *Core) QueryListingBySource(ctx context.Context, sourceID, sourceListingID string) (listing.Listing, error) {
 	l, err := c.storer.QueryListingBySource(ctx, sourceID, sourceListingID)

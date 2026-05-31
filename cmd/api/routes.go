@@ -10,7 +10,7 @@ import (
 	"github.com/cbrophy/land_trakker/foundation/web"
 )
 
-func newRouter(cfg *config.Config) http.Handler {
+func newRouter(cfg *config.Config, q web.ListingsQuerier) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
@@ -24,10 +24,8 @@ func newRouter(cfg *config.Config) http.Handler {
 	// Authenticated routes
 	r.Group(func(r chi.Router) {
 		r.Use(web.RequireAuth(cfg.Server.SessionSecret))
-		r.Get("/", func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-			w.Write([]byte("Land Trakker\n"))
-		})
+		r.Get("/", web.ListingsHandler(q))
+		r.Get("/listings/{id}", web.ListingDetailHandler(q))
 	})
 
 	return r
