@@ -24,22 +24,105 @@
     "land_trakker-nu2.17"
   ],
   "phases": [
-    {"id": "land_trakker-nu2.1", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.2", "status": "pending", "model": "claude-haiku-4-5-20251001"},
-    {"id": "land_trakker-nu2.15", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.3", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.4", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.5", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.6", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.12", "status": "pending", "model": "claude-haiku-4-5-20251001"},
-    {"id": "land_trakker-nu2.7", "status": "pending", "model": "claude-haiku-4-5-20251001"},
-    {"id": "land_trakker-nu2.8", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.9", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.10", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.11", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.13", "status": "pending", "model": "claude-haiku-4-5-20251001"},
-    {"id": "land_trakker-nu2.14", "status": "pending", "model": "claude-haiku-4-5-20251001"},
-    {"id": "land_trakker-nu2.16", "status": "pending", "model": "claude-sonnet-4-6"},
-    {"id": "land_trakker-nu2.17", "status": "pending", "model": "claude-sonnet-4-6"}
+    {
+      "id": "land_trakker-nu2.1",
+      "status": "done",
+      "model": "claude-sonnet-4-6",
+      "commit": "7466b50",
+      "merge": "195e026",
+      "test_packages": [
+        "./..."
+      ],
+      "external_surface_added": [],
+      "anomaly": "result_file_missing"
+    },
+    {
+      "id": "land_trakker-nu2.2",
+      "status": "done",
+      "model": "claude-haiku-4-5-20251001",
+      "commit": "6b2a775",
+      "test_packages": [
+        "./foundation/config/..."
+      ],
+      "external_surface_added": [
+        "config.Config",
+        "config.Load"
+      ]
+    },
+    {
+      "id": "land_trakker-nu2.15",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.3",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.4",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.5",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.6",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.12",
+      "status": "pending",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    {
+      "id": "land_trakker-nu2.7",
+      "status": "pending",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    {
+      "id": "land_trakker-nu2.8",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.9",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.10",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.11",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.13",
+      "status": "pending",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    {
+      "id": "land_trakker-nu2.14",
+      "status": "pending",
+      "model": "claude-haiku-4-5-20251001"
+    },
+    {
+      "id": "land_trakker-nu2.16",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    },
+    {
+      "id": "land_trakker-nu2.17",
+      "status": "pending",
+      "model": "claude-sonnet-4-6"
+    }
   ]
 }
