@@ -15,8 +15,6 @@
 /bin/
 /land_trakker
 
-# Generated sqlc output
-/storage/db/
 
 # Config (contains secrets)
 /land_trakker.toml

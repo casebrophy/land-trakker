@@ -8,3 +8,14 @@ sql:
         package: "db"
         out: "./storage/db"
         sql_package: "pgx/v5"
+        overrides:
+          - db_type: "geometry"
+            nullable: true
+            go_type:
+              import: "github.com/jackc/pgx/v5/pgtype"
+              type: "Text"
+          - db_type: "geometry"
+            nullable: false
+            go_type:
+              import: "github.com/jackc/pgx/v5/pgtype"
+              type: "Text"
