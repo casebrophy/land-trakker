@@ -60,6 +60,9 @@ type ParsedListing struct {
     StructuredAttrs map[string]any
     PostedAt, UpdatedAt *time.Time
     SourceStatus string
+    AuctionEndDate *time.Time     // optional auction end time
+    AuctionCurrentBid *int64      // optional current bid (cents)
+    AuctionReserve *int64         // optional reserve price (cents)
 }
 ```
 
@@ -241,6 +244,21 @@ Example: Renaming `PriceCents` → `PriceUSD` breaks all fixture tests; TestFixt
 - Fixtures live in `testdata/<sourceID>/` alongside test code
 - Scraper implementation authors are responsible for maintaining fixture pairs
 - Fixture JSON is the golden reference; Parse() implementation should match
+
+---
+
+## Phase 2: Auction Fields Impact (ParsedListing)
+
+### ⚠ AuctionEndDate, AuctionCurrentBid, AuctionReserve
+Added in Phase 2 (`foundation/scraper/scraper.go:80-83`); all three fields are optional pointers to support non-auction listings.
+
+Changing or adding to these fields requires:
+1. **Fixture JSON updates**: every `testdata/<sourceID>/fixture-N.json` must include/omit these fields (optional, all null if not present)
+2. **Parse() implementations**: each Scraper.Parse() must extract auction dates/prices if broker exposes them (or set to nil)
+3. **TestFixtures() re-run**: JSON round-trip will fail if fixture JSON shape drifts from Parse() output
+4. **Downstream consumers**: `listingbus.UpsertFromParsed()` and `listingCore` handle these as optional nullable fields; storage layer must support NULL auction columns
+
+---
 
 ## Known Drift / Future Work
 

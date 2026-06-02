@@ -26,11 +26,57 @@ type ListingFilter struct {
 }
 ```
 
+**AuctionInfo** — optional auction details:
+```
+type AuctionInfo struct {
+  EndDate    *time.Time
+  CurrentBid *int64  // cents
+  Reserve    *int64  // cents
+}
+```
+
+**DedupConfig** — thresholds for duplicate detection:
+```
+type DedupConfig struct {
+  GeoMaxKM       float64
+  AcresMaxDelta  float64
+  PriceMaxDelta  float64
+  ScoreThreshold float64
+}
+```
+**DefaultDedupConfig()** returns defaults: GeoMaxKM=10km, AcresMaxDelta/PriceMaxDelta=0.20, ScoreThreshold=0.40.
+
+**ScorePair** — scoring function `(a, b Listing, cfg DedupConfig) → (float64, []string)` computes similarity score (0.0–1.0) and matching reason strings from {geo, acres, price, broker, title}.
+
+**PossibleDuplicate** — represents a scored duplicate pair:
+```
+type PossibleDuplicate struct {
+  ListingAID   string     // UUID
+  ListingBID   string     // UUID (always ListingAID < ListingBID)
+  Score        float64    // 0.0–1.0
+  Reasons      []string   // from {DedupReasonGeo, DedupReasonAcres, DedupReasonPrice, DedupReasonBroker, DedupReasonTitle}
+  DetectedAt   time.Time
+  UserDecision *string    // user override: "duplicate" | "false_positive" | nil
+}
+```
+
+**Dedup reason constants** — declared in listing package:
+```
+const (
+  DedupReasonGeo    = "geo"
+  DedupReasonAcres  = "acres"
+  DedupReasonPrice  = "price"
+  DedupReasonBroker = "broker"
+  DedupReasonTitle  = "title"
+)
+```
+
 **Storer interface** — persistence contract:
 - Listing CRUD: CreateListing, UpdateListing, QueryListingByID, QueryListingBySource, QueryListings, QueryListingsFilter
 - Snapshot: CreateSnapshot, QuerySnapshotsByListing  
 - PriceChange: CreatePriceChange, QueryPriceChangesByListing
 - ParseAttempt: CreateParseAttempt, QueryEligibleRawFetchIDs
+- Dedup: QueryListingsForDedup, UpsertPossibleDuplicate, QueryPossibleDuplicates, UpdateDuplicateDecision
 
 **Implementation**: `storage/listingdb.Store` (PostgreSQL with pgx).
 
@@ -50,6 +96,7 @@ type ListingFilter struct {
 - **QuerySnapshotsByListing, QueryPriceChangesByListing** → history queries
 - **RecordParseAttempt** → writes parse_attempts rows
 - **geocodeAndApply**(ctx, listing) → calls geocoder with address components, handles daily limit + other errors gracefully (Phase 1)
+- **RunDedup**(ctx, DedupConfig, now) → fetches active/stale listings grouped by county, pairs them via ScorePair, upsets PossibleDuplicates above score threshold (Phase 2)
 
 ### Internal Logic
 
@@ -107,3 +154,28 @@ Adding geocoder dependency and geocodeAndApply() affects:
 - `business/domain/listing/listing.go:76` — Point struct and Listing.Geom field (nullable)
 
 Removing or changing geocoder interface requires refactoring Core.NewCore() call sites and handling address-to-Point conversion logic in both create and update paths.
+
+## Impact Callouts (Phase 2)
+
+### ⚠ Dedup System (Phase 2)
+Adding deduplication logic (Core.RunDedup, ScorePair, DedupConfig, PossibleDuplicate) affects:
+- `business/domain/listing/listing.go:182–189` — DedupReason constants (geo, acres, price, broker, title)
+- `business/domain/listing/listing.go:191–199` — PossibleDuplicate struct with ListingAID/ListingBID/Score/Reasons/DetectedAt/UserDecision fields
+- `business/domain/listing/listing.go:236–240` — Storer interface new methods: QueryListingsForDedup, UpsertPossibleDuplicate, QueryPossibleDuplicates, UpdateDuplicateDecision
+- `business/sdk/listingbus/dedup.go:14–29` — DedupConfig struct (GeoMaxKM, AcresMaxDelta, PriceMaxDelta, ScoreThreshold) and DefaultDedupConfig()
+- `business/sdk/listingbus/dedup.go:31–75` — ScorePair(a, b, cfg) computes score using geo (haversine distance ≤ GeoMaxKM), acres (% delta ≤ AcresMaxDelta), price (% delta ≤ PriceMaxDelta), broker (token overlap ≥ 0.5), title (Jaccard ≥ 0.30); returns score=len(reasons)/5.0
+- `business/sdk/listingbus/dedup.go:79–128` — Core.RunDedup(ctx, cfg, now) fetches all active/stale listings, groups by county, pairs them, calls ScorePair, upserts matches above cfg.ScoreThreshold (logs warnings on upsert failure, enforces canonical ordering ListingAID < ListingBID)
+- `storage/migrations/0005_possible_duplicates.sql` — possible_duplicates table (listing_a_id, listing_b_id, score, reasons, detected_at, user_decision; PK on (a_id, b_id); CHECK a_id < b_id)
+- `storage/listingdb/store.go` — must implement 4 new Storer methods for dedup operations
+
+Changing score computation (haversine, token Jaccard, threshold logic) requires updating test data and regenerating possible_duplicates. Adding/removing dedup reason constants requires migration and ScorePair logic updates. Changing canonical ID ordering (a < b) will break upsert uniqueness.
+
+### ⚠ Auction Extension Fields (Phase 2)
+Adding optional auction details (AuctionInfo type, Listing.AuctionEndDate/AuctionCurrentBid/AuctionReserve) affects:
+- `business/domain/listing/listing.go:44–49` — AuctionInfo struct (EndDate, CurrentBid, Reserve fields)
+- `business/domain/listing/listing.go:106–109` — Listing struct new fields: AuctionEndDate, AuctionCurrentBid, AuctionReserve (all nullable)
+- `business/domain/listing/listing.go:201–211` — Listing.Auction() method returns AuctionInfo if any auction field is set, else nil
+- `storage/migrations/0006_auction_extension.sql` — auction_extension table (id, listing_id, auction_end_date, auction_current_bid, auction_reserve) with unique constraint on listing_id
+- `storage/listingdb/store.go` — CreateListing/UpdateListing must read/write auction_extension rows; QueryListingByID must join auction_extension
+
+Changing auction field types (e.g., int64 → decimal for precision) requires migration and store method updates. Adding auction fields to ParsedListing requires parser integration. Removing the auction_extension table will orphan in-flight auction data.
