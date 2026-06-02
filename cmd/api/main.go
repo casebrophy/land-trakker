@@ -10,10 +10,57 @@ import (
 	"time"
 
 	"github.com/cbrophy/land_trakker/foundation/config"
+	"github.com/cbrophy/land_trakker/foundation/web"
 )
 
+// multiHandler chains multiple slog handlers to write to all of them.
+type multiHandler struct {
+	handlers []slog.Handler
+}
+
+func (m *multiHandler) Enabled(ctx context.Context, level slog.Level) bool {
+	for _, h := range m.handlers {
+		if h.Enabled(ctx, level) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *multiHandler) Handle(ctx context.Context, record slog.Record) error {
+	for _, h := range m.handlers {
+		_ = h.Handle(ctx, record)
+	}
+	return nil
+}
+
+func (m *multiHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
+	newHandlers := make([]slog.Handler, len(m.handlers))
+	for i, h := range m.handlers {
+		newHandlers[i] = h.WithAttrs(attrs)
+	}
+	return &multiHandler{handlers: newHandlers}
+}
+
+func (m *multiHandler) WithGroup(name string) slog.Handler {
+	newHandlers := make([]slog.Handler, len(m.handlers))
+	for i, h := range m.handlers {
+		newHandlers[i] = h.WithGroup(name)
+	}
+	return &multiHandler{handlers: newHandlers}
+}
+
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	logCapture := web.NewLogCapture(1000)
+
+	// Chain handlers: capture to LogCapture AND output JSON to stdout
+	multiHandler := &multiHandler{
+		handlers: []slog.Handler{
+			logCapture,
+			slog.NewJSONHandler(os.Stdout, nil),
+		},
+	}
+	log := slog.New(multiHandler)
 
 	cfgPath := os.Getenv("CONFIG_PATH")
 	if cfgPath == "" {
@@ -33,7 +80,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         listen,
-		Handler:      newRouter(cfg, nil, nil, nil, nil),
+		Handler:      newRouter(cfg, nil, nil, nil, nil, logCapture),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,
