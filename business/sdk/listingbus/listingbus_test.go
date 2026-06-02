@@ -916,3 +916,227 @@ func TestQueryListingsFilter_AttrWell(t *testing.T) {
 		t.Errorf("expected well=true listing")
 	}
 }
+
+// =============================================================================
+// Attribute Extraction tests
+// =============================================================================
+
+func TestUpsertFromParsed_AttributeExtraction_WaterFrontage(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	now := time.Now()
+
+	title := "Waterfront Cabin"
+	desc := "Beautiful property with creek access and riparian rights"
+	pl := scraper.ParsedListing{
+		SourceID:        "src1",
+		SourceListingID: "list1",
+		URL:             "https://example.com/list1",
+		Title:           title,
+		Description:     desc,
+	}
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.AttrWaterFrontage == nil || !*got.AttrWaterFrontage {
+		t.Errorf("expected water frontage to be true, got %v", got.AttrWaterFrontage)
+	}
+
+	// Verify extraction details are stored
+	if got.AttrsExtraction == nil {
+		t.Errorf("expected non-nil attrs_extraction")
+	} else if len(got.AttrsExtraction) == 0 {
+		t.Errorf("expected water_frontage in attrs_extraction")
+	}
+}
+
+func TestUpsertFromParsed_AttributeExtraction_OffGrid(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	now := time.Now()
+
+	title := "Off-Grid Homestead"
+	desc := "Solar powered property with no utilities connected"
+	pl := scraper.ParsedListing{
+		SourceID:        "src1",
+		SourceListingID: "list1",
+		URL:             "https://example.com/list1",
+		Title:           title,
+		Description:     desc,
+	}
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.AttrOffGrid == nil || !*got.AttrOffGrid {
+		t.Errorf("expected off-grid to be true, got %v", got.AttrOffGrid)
+	}
+}
+
+func TestUpsertFromParsed_AttributeExtraction_RoadAccess(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	now := time.Now()
+
+	title := "Mountain Property"
+	desc := "Accessible via paved county road"
+	pl := scraper.ParsedListing{
+		SourceID:        "src1",
+		SourceListingID: "list1",
+		URL:             "https://example.com/list1",
+		Title:           title,
+		Description:     desc,
+	}
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.AttrRoadAccess == nil || *got.AttrRoadAccess != "paved" {
+		t.Errorf("expected road access to be 'paved', got %v", got.AttrRoadAccess)
+	}
+}
+
+func TestUpsertFromParsed_AttributeExtraction_Multiple(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	now := time.Now()
+
+	// Test property with multiple attributes
+	title := "Agricultural Property"
+	desc := "Farm land with well and septic system, paved road access, power available"
+	pl := scraper.ParsedListing{
+		SourceID:        "src1",
+		SourceListingID: "list1",
+		URL:             "https://example.com/list1",
+		Title:           title,
+		Description:     desc,
+	}
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Check multiple attributes extracted
+	if got.AttrPropertyType == nil || *got.AttrPropertyType != "agricultural" {
+		t.Errorf("expected property type 'agricultural', got %v", got.AttrPropertyType)
+	}
+	if got.AttrWell == nil || !*got.AttrWell {
+		t.Errorf("expected well to be true, got %v", got.AttrWell)
+	}
+	if got.AttrSeptic == nil || !*got.AttrSeptic {
+		t.Errorf("expected septic to be true, got %v", got.AttrSeptic)
+	}
+	if got.AttrRoadAccess == nil || *got.AttrRoadAccess != "paved" {
+		t.Errorf("expected road access 'paved', got %v", got.AttrRoadAccess)
+	}
+	if got.AttrPower == nil || !*got.AttrPower {
+		t.Errorf("expected power to be true, got %v", got.AttrPower)
+	}
+}
+
+func TestUpsertFromParsed_AttributeExtraction_Negation(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	now := time.Now()
+
+	title := "No Well Property"
+	desc := "Property with no well and no septic system"
+	pl := scraper.ParsedListing{
+		SourceID:        "src1",
+		SourceListingID: "list1",
+		URL:             "https://example.com/list1",
+		Title:           title,
+		Description:     desc,
+	}
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.AttrWell == nil || *got.AttrWell {
+		t.Errorf("expected well to be false, got %v", got.AttrWell)
+	}
+	if got.AttrSeptic == nil || *got.AttrSeptic {
+		t.Errorf("expected septic to be false, got %v", got.AttrSeptic)
+	}
+}
+
+func TestUpsertFromParsed_AttributeExtraction_NoText(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	now := time.Now()
+
+	pl := scraper.ParsedListing{
+		SourceID:        "src1",
+		SourceListingID: "list1",
+		URL:             "https://example.com/list1",
+		// No title or description
+	}
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Should have empty attrs_extraction
+	if got.AttrsExtraction == nil {
+		t.Errorf("expected non-nil attrs_extraction (even if empty)")
+	} else if len(got.AttrsExtraction) > 0 {
+		t.Errorf("expected empty attrs_extraction, got %d entries", len(got.AttrsExtraction))
+	}
+	// All attribute fields should be nil
+	if got.AttrWaterFrontage != nil {
+		t.Errorf("expected nil water frontage, got %v", got.AttrWaterFrontage)
+	}
+}
+
+func TestUpsertFromParsed_AttributeExtraction_ExistingUpdate(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	now := time.Now()
+
+	// Create initial listing
+	pl1 := scraper.ParsedListing{
+		SourceID:        "src1",
+		SourceListingID: "list1",
+		URL:             "https://example.com/list1",
+		Title:           "Plain Land",
+		Description:     "No special attributes",
+	}
+	initial, _, err := core.UpsertFromParsed(context.Background(), pl1, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error on initial upsert: %v", err)
+	}
+
+	// Verify initial has no attributes
+	if initial.AttrWaterFrontage != nil {
+		t.Errorf("expected no water frontage initially, got %v", initial.AttrWaterFrontage)
+	}
+
+	// Now upsert with new description that has attributes
+	pl2 := scraper.ParsedListing{
+		SourceID:        "src1",
+		SourceListingID: "list1",
+		URL:             "https://example.com/list1",
+		Title:           "Waterfront Property",
+		Description:     "Beautiful property with creek and riparian access",
+	}
+	updated, _, err := core.UpsertFromParsed(context.Background(), pl2, 2, now.Add(time.Hour))
+	if err != nil {
+		t.Fatalf("unexpected error on update: %v", err)
+	}
+
+	// Verify attributes were extracted and populated
+	if updated.AttrWaterFrontage == nil || !*updated.AttrWaterFrontage {
+		t.Errorf("expected water frontage to be true after update, got %v", updated.AttrWaterFrontage)
+	}
+}

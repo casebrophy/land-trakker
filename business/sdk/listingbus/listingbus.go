@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/cbrophy/land_trakker/business/domain/listing"
+	"github.com/cbrophy/land_trakker/foundation/attrs"
 	"github.com/cbrophy/land_trakker/foundation/geocode"
 	"github.com/cbrophy/land_trakker/foundation/scraper"
 	"github.com/jackc/pgx/v5"
@@ -56,6 +58,7 @@ func (c *Core) UpsertFromParsed(ctx context.Context, pl scraper.ParsedListing, r
 		}
 		applyParsedFields(&l, pl)
 		c.geocodeAndApply(ctx, &l)
+		applyAttributeExtraction(&l)
 
 		created, err := c.storer.CreateListing(ctx, l)
 		if err != nil {
@@ -90,6 +93,7 @@ func (c *Core) UpsertFromParsed(ctx context.Context, pl scraper.ParsedListing, r
 	existing.LastSeenAt = now
 	applyParsedFields(&existing, pl)
 	c.geocodeAndApply(ctx, &existing)
+	applyAttributeExtraction(&existing)
 
 	if err := c.storer.UpdateListing(ctx, existing); err != nil {
 		return listing.Listing{}, listing.ListingSnapshot{}, fmt.Errorf("updating listing: %w", err)
@@ -349,6 +353,83 @@ func applyParsedFields(l *listing.Listing, pl scraper.ParsedListing) {
 	l.PostedAt = pl.PostedAt
 	l.SourceUpdatedAt = pl.UpdatedAt
 	l.AttrsExtra = pl.StructuredAttrs
+}
+
+// applyAttributeExtraction runs deterministic attribute extractors on a listing's
+// title and description, populating attr_* fields and storing detailed extraction
+// results in attrs_extraction.
+func applyAttributeExtraction(l *listing.Listing) {
+	// Initialize attrs_extraction
+	extraction := make(map[string]any)
+
+	// Combine title and description for extraction
+	var text strings.Builder
+	if l.Title != nil && *l.Title != "" {
+		text.WriteString(*l.Title)
+		text.WriteString(" ")
+	}
+	if l.Description != nil && *l.Description != "" {
+		text.WriteString(*l.Description)
+	}
+
+	combinedText := text.String()
+	if combinedText == "" {
+		l.AttrsExtraction = extraction
+		return
+	}
+
+	// Run all extractors
+	results := attrs.ExtractAll(combinedText)
+
+	// Water frontage (boolean)
+	if r, ok := results["water_frontage"]; ok {
+		extraction["water_frontage"] = r
+		val := r.Value == "true"
+		l.AttrWaterFrontage = &val
+	}
+
+	// Off-grid (boolean)
+	if r, ok := results["off_grid"]; ok {
+		extraction["off_grid"] = r
+		val := r.Value == "true"
+		l.AttrOffGrid = &val
+	}
+
+	// Road access (text)
+	if r, ok := results["road_access"]; ok {
+		extraction["road_access"] = r
+		l.AttrRoadAccess = &r.Value
+	}
+
+	// Power (boolean)
+	if r, ok := results["power"]; ok {
+		extraction["power"] = r
+		val := r.Value == "true"
+		l.AttrPower = &val
+	}
+
+	// Well (boolean)
+	if r, ok := results["well"]; ok {
+		extraction["well"] = r
+		val := r.Value == "true"
+		l.AttrWell = &val
+	}
+
+	// Septic (boolean)
+	if r, ok := results["septic"]; ok {
+		extraction["septic"] = r
+		val := r.Value == "true"
+		l.AttrSeptic = &val
+	}
+
+	// Property type (text)
+	if r, ok := results["property_type"]; ok {
+		extraction["property_type"] = r
+		l.AttrPropertyType = &r.Value
+	}
+
+	// Store the detailed extraction results as JSON
+	l.AttrsExtraction = extraction
 }
 
 // strPtrIfNonEmpty returns nil if s is empty, otherwise a pointer to s.
