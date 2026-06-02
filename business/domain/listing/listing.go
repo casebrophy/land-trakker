@@ -170,6 +170,7 @@ type ListingFilter struct {
 	PPAMin       *int64 // price_per_acre_cents
 	PPAMax       *int64
 	PropertyType *string // matches attr_property_type
+	FullText     *string // full-text search query
 
 	// Boolean attribute filters — nil = no constraint, true/false = must match
 	AttrWaterFrontage *bool
