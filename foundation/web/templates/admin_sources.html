@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Land Trakker — Admin: Sources</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-white shadow mb-4">
+        <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-4">
+                <span class="text-xl font-bold text-blue-700">Land Trakker</span>
+                <a href="/health" class="text-sm text-gray-500 hover:text-blue-600">Health</a>
+                <a href="/admin/sources" class="text-sm font-medium text-blue-600">Sources</a>
+            </div>
+            <a href="/logout" class="text-sm text-gray-600 hover:text-red-600">Logout</a>
+        </div>
+    </nav>
+
+    <div class="max-w-7xl mx-auto px-4 pb-8">
+
+        <h1 class="text-2xl font-bold text-gray-800 mb-4">Source Configuration</h1>
+
+        {{if .Flash}}
+        <div class="mb-4 px-4 py-3 rounded border
+            {{if eq .Flash "saved"}}bg-green-50 border-green-300 text-green-800
+            {{else if eq .Flash "backfill_started"}}bg-blue-50 border-blue-300 text-blue-800
+            {{else if eq .Flash "no_db"}}bg-yellow-50 border-yellow-300 text-yellow-800
+            {{else}}bg-gray-50 border-gray-300 text-gray-700{{end}}">
+            {{if eq .Flash "saved"}}Configuration saved.
+            {{else if eq .Flash "backfill_started"}}Backfill job started in background.
+            {{else if eq .Flash "no_db"}}Database not yet connected — changes not persisted.
+            {{else}}{{.Flash}}{{end}}
+        </div>
+        {{end}}
+
+        {{if not .Sources}}
+        <div class="bg-white rounded shadow p-4 text-sm text-gray-500">No sources configured.</div>
+        {{end}}
+
+        {{range .Sources}}
+        <div class="bg-white rounded shadow mb-6 overflow-hidden">
+
+            <!-- Source header -->
+            <div class="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+                <div>
+                    <span class="font-semibold text-gray-900 text-lg">{{.DisplayName}}</span>
+                    <span class="ml-2 text-xs text-gray-400 font-mono">{{.ID}}</span>
+                </div>
+                <div class="flex items-center gap-3">
+                    {{if .Enabled}}
+                    <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-green-100 text-green-700">enabled</span>
+                    {{else}}
+                    <span class="text-xs font-medium px-2 py-0.5 rounded-full bg-gray-100 text-gray-500">disabled</span>
+                    {{end}}
+                    <span class="text-xs text-gray-400">Last run: {{.LastRunAt}}</span>
+                </div>
+            </div>
+
+            <div class="px-5 py-4 grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+                <!-- Edit thresholds form -->
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Thresholds</h3>
+                    <form method="POST" action="/admin/sources/{{.ID}}" class="space-y-3">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Stale after (days)</label>
+                                <input type="number" name="absence_days_stale" value="{{.AbsenceDaysBeforeStale}}" min="1"
+                                       class="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Inactive after (days)</label>
+                                <input type="number" name="absence_days_inactive" value="{{.AbsenceDaysBeforeInactive}}" min="1"
+                                       class="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Missed runs threshold</label>
+                                <input type="number" name="consecutive_missed" value="{{.ConsecutiveMissedRunsThreshold}}" min="1"
+                                       class="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Min result ratio</label>
+                                <input type="number" name="min_ratio" value="{{.MinResultRatioForInactivation}}" min="0" max="1" step="0.001"
+                                       class="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Rate limit (ms)</label>
+                                <input type="number" name="rate_limit_ms" value="{{.RateLimitMS}}" min="0"
+                                       class="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                            </div>
+                            <div>
+                                <label class="block text-xs text-gray-500 mb-1">Concurrency</label>
+                                <input type="number" name="concurrency" value="{{.Concurrency}}" min="1" max="10"
+                                       class="w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <label class="text-xs text-gray-500">Enabled</label>
+                            <select name="enabled" class="border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-400">
+                                <option value="true" {{if .Enabled}}selected{{end}}>Yes</option>
+                                <option value="false" {{if not .Enabled}}selected{{end}}>No</option>
+                            </select>
+                        </div>
+                        <div class="pt-1">
+                            <button type="submit"
+                                    class="px-4 py-1.5 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-400">
+                                Save
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Recent runs + backfill -->
+                <div>
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3 uppercase tracking-wide">Recent Runs</h3>
+                    {{if .RecentRuns}}
+                    <table class="w-full text-xs text-gray-700">
+                        <thead>
+                            <tr class="text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                                <th class="text-left pb-1">Started</th>
+                                <th class="text-left pb-1">Status</th>
+                                <th class="text-right pb-1">Disc</th>
+                                <th class="text-right pb-1">Parsed</th>
+                                <th class="text-right pb-1">Errors</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .RecentRuns}}
+                            <tr class="border-b border-gray-50">
+                                <td class="py-1 font-mono">{{.StartedAt}}</td>
+                                <td class="py-1">
+                                    {{if eq .Status "ok"}}
+                                        <span class="text-green-600 font-medium">ok</span>
+                                    {{else if eq .Status "partial"}}
+                                        <span class="text-yellow-600 font-medium">partial</span>
+                                    {{else if eq .Status "failed"}}
+                                        <span class="text-red-600 font-medium">failed</span>
+                                    {{else if eq .Status "running"}}
+                                        <span class="text-blue-600 font-medium">running</span>
+                                    {{else}}
+                                        <span class="text-gray-400">{{.Status}}</span>
+                                    {{end}}
+                                </td>
+                                <td class="py-1 text-right">{{.Discovered}}</td>
+                                <td class="py-1 text-right">{{.Parsed}}</td>
+                                <td class="py-1 text-right {{if ne .Errors "0"}}text-red-600{{end}}">{{.Errors}}</td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                    {{else}}
+                    <p class="text-xs text-gray-400">No runs recorded.</p>
+                    {{end}}
+
+                    <!-- Backfill section -->
+                    <div class="mt-4 pt-4 border-t border-gray-100">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <span class="text-xs text-gray-500">Backfill eligible: </span>
+                                {{if .EligibleAvailable}}
+                                <span class="text-sm font-semibold {{if gt .EligibleCount 0}}text-orange-600{{else}}text-gray-700{{end}}">
+                                    {{.EligibleCount}}
+                                </span>
+                                {{else}}
+                                <span class="text-xs text-gray-400">N/A</span>
+                                {{end}}
+                            </div>
+                            <form method="POST" action="/admin/sources/{{.ID}}/backfill"
+                                  onsubmit="return confirm('Start backfill for {{.DisplayName}}?')">
+                                <button type="submit"
+                                        class="px-3 py-1 text-xs bg-orange-500 text-white rounded hover:bg-orange-600 focus:outline-none focus:ring-2 focus:ring-orange-400">
+                                    Run backfill
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+        {{end}}
+
+    </div>
+</body>
+</html>
