@@ -4,7 +4,7 @@
 
 ### Core Types
 
-**Listing** — canonical land listing record with UUID, source identity, state machine fields, parsed fields (title, price, acres, address, broker), and computed fields (price_per_acre_cents).
+**Listing** — canonical land listing record with UUID, source identity, state machine fields, parsed fields (title, price, acres, address, broker), structured attributes (attr_* fields + attrs_extraction map for detailed extraction results), and computed fields (price_per_acre_cents).
 
 **ListingStatus** — enum: `active`, `stale`, `presumed_inactive`, `confirmed_sold`, `withdrawn`. State transitions in Core.ApplyMissedRun and UpsertFromParsed.
 
@@ -14,7 +14,7 @@
 
 **ParseAttempt** — single parse attempt record (RawFetchID, ParserVersion, Outcome, ErrorMessage, SnapshotID).
 
-**ListingFilter** — optional search constraints with nil-means-no-constraint semantics:
+**ListingFilter** — optional search constraints with nil-means-no-constraint semantics (Phase 1 + Phase 3):
 ```
 type ListingFilter struct {
   AcresMin, AcresMax *float64
@@ -22,6 +22,7 @@ type ListingFilter struct {
   Counties []string
   PPAMin, PPAMax *int64 (price_per_acre_cents)
   PropertyType *string
+  FullText *string                               // Phase 3: full-text search query on title+description
   AttrWaterFrontage, AttrOffGrid, AttrPower, AttrWell, AttrSeptic *bool
 }
 ```
@@ -89,10 +90,10 @@ const (
 **Dependency**: Storer interface + slog.Logger.
 
 **Key Methods**:
-- **UpsertFromParsed**(ParsedListing, rawFetchID, now) → creates/updates Listing, snapshots with diffs, detects price changes; includes geocoding call via geocodeAndApply
+- **UpsertFromParsed**(ParsedListing, rawFetchID, now) → creates/updates Listing, snapshots with diffs, detects price changes; includes geocoding call via geocodeAndApply and attribute extraction via applyAttributeExtraction (Phase 3)
 - **ApplyMissedRun**(listingID, MissedRunConfig, runHealthy, now) → health-gated status transitions (active→stale→presumed_inactive) based on consecutive misses & absence days
 - **QueryListings, QueryListingByID, QueryListingBySource** → Listing lookups with error wrapping
-- **QueryListingsFilter**(ListingFilter, limit, offset) → filtered Listing lookups with ListingFilter constraints (Phase 1)
+- **QueryListingsFilter**(ListingFilter, limit, offset) → filtered Listing lookups with ListingFilter constraints (Phase 1 + Phase 3 FullText full-text search on title+description using PostgreSQL to_tsvector/plainto_tsquery)
 - **QuerySnapshotsByListing, QueryPriceChangesByListing** → history queries
 - **RecordParseAttempt** → writes parse_attempts rows
 - **geocodeAndApply**(ctx, listing) → calls geocoder with address components, handles daily limit + other errors gracefully (Phase 1)
@@ -105,6 +106,8 @@ const (
 **diffSnapshots** — 5-field snapshot diff (price_cents, acres, title, description, status) in format `{"field": {"old": ..., "new": ...}}`.
 
 **applyParsedFields** — copies ParsedListing fields (address, photos, broker, structured attrs) onto domain Listing.
+
+**applyAttributeExtraction** (Phase 3) — runs deterministic attribute extractors on listing title+description using foundation/attrs package; populates attr_* boolean/string fields (AttrWaterFrontage, AttrOffGrid, AttrRoadAccess, AttrPower, AttrWell, AttrSeptic, AttrPropertyType) and stores detailed extraction results in AttrsExtraction map for audit/debugging.
 
 **MissedRunConfig** — source-level thresholds: AbsenceDaysBeforeStale (14), AbsenceDaysBeforeInactive (30), ConsecutiveMissedRunsThreshold (3).
 
@@ -179,3 +182,23 @@ Adding optional auction details (AuctionInfo type, Listing.AuctionEndDate/Auctio
 - `storage/listingdb/store.go` — CreateListing/UpdateListing must read/write auction_extension rows; QueryListingByID must join auction_extension
 
 Changing auction field types (e.g., int64 → decimal for precision) requires migration and store method updates. Adding auction fields to ParsedListing requires parser integration. Removing the auction_extension table will orphan in-flight auction data.
+
+## Impact Callouts (Phase 3)
+
+### ⚠ Structured Attribute Extraction (Phase 3)
+Adding attr_* boolean/string fields and attrs_extraction map to Listing affects:
+- `business/domain/listing/listing.go:95–104` — Listing struct new fields: AttrWaterFrontage, AttrOffGrid, AttrRoadAccess, AttrPower, AttrWell, AttrSeptic, AttrPropertyType (all nullable); AttrsExtra (schema-supplied unstructured attrs); AttrsExtraction (extraction audit map)
+- `business/sdk/listingbus/listingbus.go:40–62, 88–96` — UpsertFromParsed calls applyAttributeExtraction for both new and existing listings
+- `business/sdk/listingbus/listingbus.go:361–432` — applyAttributeExtraction implementation: runs attrs.ExtractAll on combined title+description, populates attr_* fields from extraction results, stores full extraction map in AttrsExtraction for audit
+
+Removing any attr_* field requires updating the extraction logic, store queries, and frontend filter UI. Changing attr field types (e.g., AttrPropertyType from string to enum) requires both extraction and storage layer updates. Disabling attribute extraction will null-populate attr_* fields on subsequent upserts.
+
+### ⚠ Full-Text Search Query (Phase 3)
+Adding FullText field to ListingFilter and full-text search implementation affects:
+- `business/domain/listing/listing.go:173` — ListingFilter.FullText field (*string for SQL plainto_tsquery)
+- `business/domain/listing/listing.go:223` — Storer.QueryListingsFilter must support FullText constraint
+- `storage/migrations/0002_listings.sql:95` — GIN index on `to_tsvector('english', coalesce(description,'') || ' ' || coalesce(title,''))` for full-text queries
+- `storage/listingdb/store.go` — QueryListingsFilter implementation adds WHERE clause `to_tsvector(...) @@ plainto_tsquery('english', $N)` when f.FullText is non-nil
+- `business/sdk/listingbus/listingbus.go:168–173` — QueryListingsFilter wrapper calls storer with ListingFilter
+
+Removing full-text support requires dropping the GIN index and FullText filter field. Changing the tokenizer language ('english' → 'german', etc.) requires index rebuild. Changing the search columns (title+description → include broker_name, address) requires index and query logic updates.

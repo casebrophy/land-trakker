@@ -63,6 +63,7 @@ type ListingFilter struct {
     AttrPower         *bool
     AttrWell          *bool
     AttrSeptic        *bool
+    FullText          *string   // Phase 3: full-text search query string; uses plainto_tsquery
 }
 ```
 
@@ -116,7 +117,7 @@ func NewStore(pool *pgxpool.Pool) *Store
 
 ### Migrations (Schema)
 - `storage/migrations/0001_core.sql` — tables: sources (scraper config), scrape_runs (execution history), raw_fetches (HTTP responses), parse_attempts (parsing outcomes)
-- `storage/migrations/0002_listings.sql` — tables: listings (canonical land records), listing_snapshots (timeline), price_changes (tracking), PostGIS geometry support
+- `storage/migrations/0002_listings.sql` — tables: listings (canonical land records), listing_snapshots (timeline), price_changes (tracking), PostGIS geometry support; Phase 3: GIN index on tsvector (title || description) for full-text search
 - `storage/migrations/0003_geocode_cache.sql` — table: geocode_cache (address lookup cache with geometry, provider, confidence, raw response)
 - `storage/migrations/0004_saved_searches.sql` — tables: saved_searches (user-curated filters with ListingFilter query as jsonb), search_hits (listing × search results with dedup on unique index)
 - `storage/migrations/0005_possible_duplicates.sql` — table: possible_duplicates (pair-wise listing similarity with score, detection reason array, user merge decision)
@@ -134,7 +135,7 @@ func NewStore(pool *pgxpool.Pool) *Store
 
 ### Store Implementations
 - `storage/sourcedb/store.go` — implements source.Storer; methods CreateSource, UpdateSource, QuerySourceByID, QuerySources, CreateRun, UpdateRun, QueryRunByID, QueryRunsBySource, CreateRawFetch, QueryRawFetchByID, QueryRawFetchesByListing; includes type conversion helpers (pgx ⇄ domain types)
-- `storage/listingdb/store.go` — implements listing.Storer; methods CreateListing, UpdateListing, QueryListingByID, QueryListingBySource, CreateSnapshot, QuerySnapshotsByListing, CreatePriceChange, QueryPriceChangesByListing, CreateParseAttempt, QueryListings, QueryListingsFilter (dynamic filter), QueryEligibleRawFetchIDs, QueryListingsForDedup, UpsertPossibleDuplicate, QueryPossibleDuplicates, CreateAuctionExt, UpdateAuctionExt, getAuctionExtByListingID, getAuctionExtByListingIDs; includes JSON marshaling, geometry (WKT) helpers, dedup query logic, and auction extension metadata methods
+- `storage/listingdb/store.go` — implements listing.Storer; methods CreateListing, UpdateListing, QueryListingByID, QueryListingBySource, CreateSnapshot, QuerySnapshotsByListing, CreatePriceChange, QueryPriceChangesByListing, CreateParseAttempt, QueryListings, QueryListingsFilter (dynamic filter with Phase 3 full-text search), QueryEligibleRawFetchIDs, QueryListingsForDedup, UpsertPossibleDuplicate, QueryPossibleDuplicates, CreateAuctionExt, UpdateAuctionExt, getAuctionExtByListingID, getAuctionExtByListingIDs; includes JSON marshaling, geometry (WKT) helpers, dedup query logic, and auction extension metadata methods
 - `storage/searchdb/store.go` — implements search.Storer; raw pgx methods CreateSavedSearch, UpdateSavedSearch, DeleteSavedSearch, QuerySavedSearchByID, QuerySavedSearches, CreateHitIfAbsent (upsert), QueryUnseen, MarkHitsSeen; stores ListingFilter as jsonb in saved_searches.query; dedup on search_hits unique index (saved_search_id, listing_id, reason, hit_at)
 
 ### Configuration
@@ -162,13 +163,14 @@ func NewStore(pool *pgxpool.Pool) *Store
 - **Callers:** `business/domain/listing/*` services that depend on listing.Storer
 - **Ripple:** Adding/removing a method requires corresponding .sql query changes and sqlc regeneration
 
-### ⚠ QueryListingsFilter() Method (storage/listingdb/store.go:312–441)
-**Dynamic SQL filtering with `listing.ListingFilter` struct — custom implementation, not sqlc-generated.**
-- Accepts `ListingFilter` with optional fields: `AcresMin/Max`, `PriceMin/Max`, `Counties`, `PPAMin/Max`, `PropertyType`, boolean attributes
-- Builds WHERE clause conditionally: `acres >= $N`, `price_cents >= $N`, `county = ANY($N)`, etc.
+### ⚠ QueryListingsFilter() Method (storage/listingdb/store.go:401–554)
+**Dynamic SQL filtering with `listing.ListingFilter` struct — custom implementation, not sqlc-generated. Phase 3: includes full-text search.**
+- Accepts `ListingFilter` with optional fields: `AcresMin/Max`, `PriceMin/Max`, `Counties`, `PPAMin/Max`, `PropertyType`, boolean attributes, **FullText** (new in Phase 3)
+- Builds WHERE clause conditionally: `acres >= $N`, `price_cents >= $N`, `county = ANY($N)`, **`to_tsvector('english', coalesce(title,'') || ' ' || coalesce(description,'')) @@ plainto_tsquery('english', $N)`**, etc.
+- Full-text query uses PostgreSQL `plainto_tsquery` for user-friendly input parsing; backed by GIN index on computed tsvector (line 471: `storage/migrations/0002_listings.sql`)
 - Scans results into `db.GetListingByIDRow` and converts to `listing.Listing` using `getByIDRowToListing()`
-- **Impact:** Changing `ListingFilter` struct requires updating the filter builder logic in lines 342–380
-- **Integration test:** `storage/listingdb/listingdb_integration_test.go:TestQueryListingsFilter` validates all filter combinations
+- **Impact:** Changing `ListingFilter.FullText` or the tsvector index strategy requires updating the query in line 471 and the GIN index in 0002_listings.sql in parallel
+- **Integration test:** `storage/listingdb/listingdb_integration_test.go:TestQueryListingsFilter` validates all filter combinations including full-text
 
 ### ⚠ SavedSearches & SearchHits Tables (0004_saved_searches.sql)
 **User-curated search filters stored as ListingFilter (jsonb) with dedup hit tracking.**
@@ -186,6 +188,16 @@ func NewStore(pool *pgxpool.Pool) *Store
 - **Implementation:** `storage/listingdb/store.go` — QueryListingsForDedup (list candidates), UpsertPossibleDuplicate (upsert pair), QueryPossibleDuplicates (filter by decision status)
 - **Callers:** business/domain/listing/* dedup service for similarity detection and merge workflows
 - **No sqlc queries:** Custom implementation in listingdb for dynamic pair management
+
+### ⚠ Full-Text Search (Phase 3) — ListingFilter.FullText
+**Query listings by keyword search across title and description using PostgreSQL full-text search (FTS).**
+- **Field:** `ListingFilter.FullText` — search query string (non-nil triggers FTS WHERE condition)
+- **SQL:** `to_tsvector('english', coalesce(title,'') || ' ' || coalesce(description,'')) @@ plainto_tsquery('english', $N)` (line 471, storage/listingdb/store.go)
+- **Index:** GIN index in `storage/migrations/0002_listings.sql` — `CREATE INDEX ON listings USING GIN (to_tsvector('english', coalesce(description,'') || ' ' || coalesce(title,'')));`
+- **Query parsing:** `plainto_tsquery` accepts user input and safely generates ts_query (no SQL injection, ignores operators)
+- **Integration:** QueryListingsFilter() conditionally adds FTS to WHERE clause if FullText is non-nil; results batch-load auction extensions same as other queries
+- **Callers:** business/domain/listing/* for user-driven search; saved searches may include FullText in ListingFilter jsonb
+- **Performance:** GIN index is O(log N) lookup; full-text queries are typically fast even on large listings tables
 
 ### ⚠ AuctionExtension Table (0006_auction_extension.sql)
 **Auction metadata split from main listings table for optional per-property tracking.**

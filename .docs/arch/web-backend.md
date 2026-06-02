@@ -14,6 +14,16 @@
 
 **RequireAuth(secret)** — chi middleware that redirects unauthenticated requests to /login with 303 SeeOther.
 
+### Health & System Monitoring
+
+**HealthQuerier interface** (`health_dashboard.go`) — minimal contract: `QuerySources(ctx) []source.Source`, `QueryRecentRuns(ctx, sourceID, limit) []source.ScrapeRun`. Used by HealthDashboardHandler to fetch per-source metrics.
+
+**HealthDashboardHandler(hq)** → GET /health (public). Queries hq for sources and recent 30 runs per source. Builds sourcePanelData (Name, LastRunAt, LastStatus, Sparkline of 30 days as status indicators, ErrorRate %). Reads runtime.MemStats for system metrics (Goroutines, AllocMB, SysMB, NumGC). Renders health.html. Returns partial data if hq is nil (graceful degradation).
+
+**LogCapture** (`logs.go`) — circular buffer (capacity default 100) implementing slog.Handler. Handle() stores formatted log records (Message + Attrs); Recent(n) returns last N in reverse chronological order; Filter(query, n) returns matching entries (case-insensitive substring search, max 500 entries).
+
+**LogsHandler(lc)** → GET /health/logs (public). Parses query param q (search query, case-insensitive) and limit (default 50, max 500). If q present, calls lc.Filter(q, limit); else lc.Recent(limit). Renders logs.html with results and search form. Returns empty list if lc is nil.
+
 ### Login Handlers
 
 **LoginHandler(passwordHash, secret)** → GET renders embedded login.html template; POST validates bcrypt password hash against form field, calls SetSession on success with 303 redirect to /, or returns 401 + form on invalid password.
@@ -26,7 +36,7 @@
 
 **ListingsHandler(q)** → GET only. Supports HTMX partial requests (HX-Request header). Parses:
   - Pagination: limit (default 50, max 200), offset query params
-  - Filter form: acres_min/acres_max (float), price_min/price_max (int, converted to cents), counties (comma-separated), property_type, attr_water/attr_off_grid/attr_power/attr_well/attr_septic (checkboxes)
+  - Filter form: q (full-text search), acres_min/acres_max (float), price_min/price_max (int, converted to cents), counties (comma-separated), property_type, attr_water/attr_off_grid/attr_power/attr_well/attr_septic (checkboxes)
   
   Queries paginated listings with parseFilter (empty filter → QueryListings; non-empty → QueryListingsFilter). Builds listingRow objects (ID, Title, Status, PricePerAcre formatted as $X/acre, Acres, Location as City+State, FirstSeenDate formatted YYYY-MM-DD) and mapMarker objects from Geom (Lat, Lng, Title, ID) for Leaflet. Renders listings.html (full page) on initial load or listings_results.html (partial template "results_content") on HTMX requests. Returns 503 if q is nil, 500 on query error.
 
@@ -71,6 +81,20 @@
 **DuplicatesHandler(dq)** → GET /duplicates. Queries dq.QueryPossibleDuplicates(nil) to show only undecided pairs. For each pair, queries listing A and B details, builds duplicatePairRow (ListingAID, ListingATitle, ListingAPrice formatted cents, ListingAURL, ListingAAddr; same for B; ScorePercent as 0-100 float, Reasons as comma-joined dedup reason labels). Renders duplicates.html with pairs table. Returns 503 if dq is nil.
 
 **DuplicatesUpdateHandler(dq)** → POST /duplicates/decision. Parses form: action (same/different/dismiss), a_id, b_id. Validates IDs present, maps action to decision string, calls dq.UpdateDuplicateDecision(aID, bID, decision), redirects to /duplicates.
+
+### Admin: Sources & Backfill
+
+**AdminSourcesQuerier interface** (`admin_sources.go`) — minimal contract: `QuerySources(ctx) []source.Source`, `QueryRecentRuns(ctx, sourceID, limit) []source.ScrapeRun`, `CountBackfillEligible(ctx, sourceID) int`.
+
+**AdminSourcesUpdater interface** (`admin_sources.go`) — minimal contract: `QuerySourceByID(ctx, id) source.Source`, `UpdateSource(ctx, src) error`.
+
+**BackfillTrigger interface** (`admin_sources.go`) — minimal contract: `TriggerBackfill(sourceID)`.
+
+**AdminSourcesHandler(asq)** → GET /admin/sources (authenticated). Queries asq for all sources and recent 5 runs per source; counts backfill-eligible listings per source. Builds adminSourcePanel (ID, DisplayName, BaseURL, Enabled, RateLimitMS, Concurrency, AbsenceDaysBeforeStale, AbsenceDaysBeforeInactive, ConsecutiveMissedRunsThreshold, MinResultRatioForInactivation formatted "%.3f", LastRunAt as timeAgo, RecentRuns table rows, EligibleCount, EligibleAvailable flag). Renders admin_sources.html with flash query param (e.g., "saved", "backfill_started"). Returns 503 if asq is nil.
+
+**AdminSourcesUpdateHandler(asu)** → POST /admin/sources/{id} (authenticated). Parses form: absence_days_stale, absence_days_inactive, consecutive_missed, min_ratio, rate_limit_ms, concurrency (all int or float), enabled (checkbox). Queries source by ID, updates fields, calls asu.UpdateSource(), redirects to /admin/sources?flash=saved. Returns 404 if source not found, 500 on update error.
+
+**AdminSourcesBackfillHandler(bt)** → POST /admin/sources/{id}/backfill (authenticated). Parses URL param {id}, calls bt.TriggerBackfill(id) if bt is non-nil, redirects to /admin/sources?flash=backfill_started.
 
 ### Helpers
 
@@ -117,52 +141,62 @@ Embedded via `//go:embed templates/`. All templates parsed at package init:
 ### Route Wiring (`routes.go`)
 
 ```
-GET  /health                  → HealthHandler()
-GET  /login, POST /login      → LoginHandler(cfg.Server.AdminPasswordHash, cfg.Server.SessionSecret)
-GET  /logout                  → LogoutHandler()
+GET  /health                     → HealthDashboardHandler(hq) [public]
+GET  /health/logs                → LogsHandler(lc) [public]
+GET  /login, POST /login         → LoginHandler(cfg.Server.AdminPasswordHash, cfg.Server.SessionSecret)
+GET  /logout                     → LogoutHandler()
 
 Group {
   Middleware: RequireAuth(cfg.Server.SessionSecret)
-  GET  /                      → ListingsHandler(q)
-  GET  /listings/{id}         → ListingDetailHandler(q)
+  GET  /                         → ListingsHandler(q)
+  GET  /listings/{id}            → ListingDetailHandler(q)
 
-  GET  /searches              → SearchesHandler(sc)
-  GET  /searches/new          → SearchesNewHandler()
-  POST /searches              → SearchesCreateHandler(sc)
-  GET  /searches/{id}/edit    → SearchesEditHandler(sc)
-  POST /searches/{id}         → SearchesUpdateHandler(sc)
-  POST /searches/{id}/delete  → SearchesDeleteHandler(sc)
+  GET  /searches                 → SearchesHandler(sc)
+  GET  /searches/new             → SearchesNewHandler()
+  POST /searches                 → SearchesCreateHandler(sc)
+  GET  /searches/{id}/edit       → SearchesEditHandler(sc)
+  POST /searches/{id}            → SearchesUpdateHandler(sc)
+  POST /searches/{id}/delete     → SearchesDeleteHandler(sc)
 
-  GET  /digest                → DigestHandler(sc, q)
-  POST /digest/mark-seen      → DigestMarkSeenHandler(sc)
+  GET  /digest                   → DigestHandler(sc, q)
+  POST /digest/mark-seen         → DigestMarkSeenHandler(sc)
 
-  GET  /duplicates            → DuplicatesHandler(dq)
-  POST /duplicates/decision   → DuplicatesUpdateHandler(dq)
+  GET  /duplicates               → DuplicatesHandler(dq)
+  POST /duplicates/decision      → DuplicatesUpdateHandler(dq)
+
+  GET  /admin/sources            → AdminSourcesHandler(asq)
+  POST /admin/sources/{id}       → AdminSourcesUpdateHandler(asu)
+  POST /admin/sources/{id}/backfill → AdminSourcesBackfillHandler(bt)
 }
 ```
 
-Public: /health, /login routes. Authenticated group protects all others: listings, searches, digest, duplicates. newRouter signature: `newRouter(cfg, q, sc, dq)` injects ListingsQuerier, SearchCore, DuplicatesQuerier as dependencies.
+Public: /health, /health/logs, /login routes. Authenticated group protects: listings, searches, digest, duplicates, admin/sources. newRouter signature: `newRouter(cfg, q, sc, dq, hq, lc, asq, asu, bt)` injects ListingsQuerier, SearchCore, DuplicatesQuerier, HealthQuerier, LogCapture, AdminSourcesQuerier, AdminSourcesUpdater, BackfillTrigger as dependencies.
 
 ---
 
 ## Data Flow
 
-1. **Unauthenticated request** → RequireAuth redirects to /login
-2. **Login POST** → bcrypt compare; on success, SetSession + redirect to /
-3. **GET /** (initial load) → ListingsHandler detects no HTMX header; queries listings (empty filter); builds rows + markers; renders full listings.html (map + filter form + results div)
-4. **GET /** (HTMX filter/paginate) → ListingsHandler detects HX-Request header; queries with parseFilter(r); builds rows + markers; renders listings_results.html partial "results_content"; browser runs embedded updateMapMarkers(markers) script via htmx:afterSettle event
-5. **GET /listings/{id}** → ListingDetailHandler queries Listing + ListingSnapshot history; builds timelineData (points array: date, price, acres); renders listing_detail.html; Chart.js initializes on page load with dual-axis line chart (price on left Y, acres on right Y)
-6. **GET /searches** (Phase 2) → SearchesHandler queries sc.QuerySavedSearches(); builds savedSearchRow list (filterSummary computed); renders searches.html full page
-7. **GET /searches/new** (Phase 2) → SearchesNewHandler renders search_form.html with empty form
-8. **POST /searches** (Phase 2) → SearchesCreateHandler parses form (name, enabled, filter), converts filter to ListingFilter (cents), calls sc.CreateSavedSearch(), redirects to /searches
-9. **GET /searches/{id}/edit** (Phase 2) → SearchesEditHandler queries sc.QuerySavedSearchByID(id), builds filterForm from ListingFilter (reverse conversion: cents to dollars), renders search_form.html with IsEdit=true for pre-population
-10. **POST /searches/{id}** (Phase 2) → SearchesUpdateHandler parses form, calls sc.UpdateSavedSearch(id, ...), redirects to /searches
-11. **POST /searches/{id}/delete** (Phase 2) → SearchesDeleteHandler calls sc.DeleteSavedSearch(id), redirects to /searches
-12. **GET /digest** (Phase 2) → DigestHandler queries sc.QueryUnseen(200); builds searchNames map; for each hit, if lq available, enriches with listing details; renders digest.html with digestHitRow objects and comma-separated hit IDs
-13. **POST /digest/mark-seen** (Phase 2) → DigestMarkSeenHandler parses hit_ids form field (comma-split, trim), calls sc.MarkHitsSeen(ids), redirects to /digest
-14. **GET /duplicates** (Phase 2) → DuplicatesHandler queries dq.QueryPossibleDuplicates(nil); for each pair, queries listing A + B details (price, title, address), builds duplicatePairRow; renders duplicates.html with pair table
-15. **POST /duplicates/decision** (Phase 2) → DuplicatesUpdateHandler parses form (action: same/different/dismiss, a_id, b_id), maps action to decision string, calls dq.UpdateDuplicateDecision(aID, bID, decision), redirects to /duplicates
-16. **Logout** → ClearSession + redirect to /login
+1. **GET /health** (public, no auth) → HealthDashboardHandler queries HealthQuerier for sources and recent runs; renders health.html with source panels (sparkline, error rate) and system stats.
+2. **GET /health/logs** (public, no auth) → LogsHandler parses query param q and limit; searches LogCapture (or returns recent entries); renders logs.html with results.
+3. **Unauthenticated request** → RequireAuth redirects to /login
+4. **Login POST** → bcrypt compare; on success, SetSession + redirect to /
+5. **GET /** (initial load) → ListingsHandler detects no HTMX header; queries listings (empty filter); builds rows + markers; renders full listings.html (map + filter form + results div)
+6. **GET /** (HTMX filter/paginate) → ListingsHandler detects HX-Request header; queries with parseFilter(r) including optional q param for full-text search; builds rows + markers; renders listings_results.html partial "results_content"; browser runs embedded updateMapMarkers(markers) script via htmx:afterSettle event
+7. **GET /listings/{id}** → ListingDetailHandler queries Listing + ListingSnapshot history; builds timelineData (points array: date, price, acres); renders listing_detail.html; Chart.js initializes on page load with dual-axis line chart (price on left Y, acres on right Y)
+8. **GET /searches** (Phase 2) → SearchesHandler queries sc.QuerySavedSearches(); builds savedSearchRow list (filterSummary computed); renders searches.html full page
+9. **GET /searches/new** (Phase 2) → SearchesNewHandler renders search_form.html with empty form
+10. **POST /searches** (Phase 2) → SearchesCreateHandler parses form (name, enabled, filter), converts filter to ListingFilter (cents), calls sc.CreateSavedSearch(), redirects to /searches
+11. **GET /searches/{id}/edit** (Phase 2) → SearchesEditHandler queries sc.QuerySavedSearchByID(id), builds filterForm from ListingFilter (reverse conversion: cents to dollars), renders search_form.html with IsEdit=true for pre-population
+12. **POST /searches/{id}** (Phase 2) → SearchesUpdateHandler parses form, calls sc.UpdateSavedSearch(id, ...), redirects to /searches
+13. **POST /searches/{id}/delete** (Phase 2) → SearchesDeleteHandler calls sc.DeleteSavedSearch(id), redirects to /searches
+14. **GET /digest** (Phase 2) → DigestHandler queries sc.QueryUnseen(200); builds searchNames map; for each hit, if lq available, enriches with listing details; renders digest.html with digestHitRow objects and comma-separated hit IDs
+15. **POST /digest/mark-seen** (Phase 2) → DigestMarkSeenHandler parses hit_ids form field (comma-split, trim), calls sc.MarkHitsSeen(ids), redirects to /digest
+16. **GET /duplicates** (Phase 2) → DuplicatesHandler queries dq.QueryPossibleDuplicates(nil); for each pair, queries listing A + B details (price, title, address), builds duplicatePairRow; renders duplicates.html with pair table
+17. **POST /duplicates/decision** (Phase 2) → DuplicatesUpdateHandler parses form (action: same/different/dismiss, a_id, b_id), maps action to decision string, calls dq.UpdateDuplicateDecision(aID, bID, decision), redirects to /duplicates
+18. **GET /admin/sources** (Phase 3) → AdminSourcesHandler queries asq for all sources and recent 5 runs, counts backfill-eligible per source, renders admin_sources.html with config panels and run history.
+19. **POST /admin/sources/{id}** (Phase 3) → AdminSourcesUpdateHandler parses form (rate_limit_ms, concurrency, absence thresholds, min_ratio, enabled flag), updates source, redirects to /admin/sources?flash=saved.
+20. **POST /admin/sources/{id}/backfill** (Phase 3) → AdminSourcesBackfillHandler extracts URL param {id}, calls bt.TriggerBackfill(id), redirects to /admin/sources?flash=backfill_started.
+21. **Logout** → ClearSession + redirect to /login
 
 ---
 
@@ -183,3 +217,7 @@ Public: /health, /login routes. Authenticated group protects all others: listing
 13. **Digest** (Phase 2) — shows unseen SearchHit records from QueryUnseen(200). Hit enrichment depends on lq availability; if nil, shows only hit metadata. SearchName lookup deduplicates by cached query. MarkHitsSeen batch-updates, then redirects back to /digest.
 14. **DuplicatesQuerier interface** (Phase 2) — injected dependency for dedup review. QueryPossibleDuplicates(nil) filters to undecided pairs. UpdateDuplicateDecision accepts action string (same/different/dismiss) mapped to decision column.
 15. **Duplicates decision** (Phase 2) — form submits action + a_id + b_id. Handler validates IDs present, maps action, updates both listings' duplicate_decision column. On reload, QueryPossibleDuplicates(nil) excludes decided pairs.
+16. **HealthQuerier interface** (Phase 3) — injected dependency for system health dashboard. QuerySources returns all configured sources; QueryRecentRuns returns recent N runs per source. HealthDashboardHandler gracefully degrades if nil.
+17. **LogCapture** (Phase 3) — circular slog.Handler buffer implementing Enabled/Handle/WithAttrs/WithGroup. LogsHandler calls Recent(n) or Filter(query, n) and renders logs.html. Supports full-text search on captured logs.
+18. **AdminSourcesQuerier/Updater interfaces & BackfillTrigger** (Phase 3) — injected dependencies for source config. AdminSourcesHandler displays source configuration and recent run history. AdminSourcesUpdateHandler modifies per-source thresholds (absence days, consecutive misses, result ratio, rate limits, concurrency). AdminSourcesBackfillHandler triggers background backfill via BackfillTrigger.TriggerBackfill(id).
+19. **Full-text search** (Phase 3) — ListingFilter.FullText field (optional string pointer). parseFilter extracts query param "q" and sets filter.FullText. isFilterEmpty checks for nil. ListingsHandler passes FullText to QueryListingsFilter for full-text matching in listings.
