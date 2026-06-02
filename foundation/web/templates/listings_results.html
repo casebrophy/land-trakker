@@ -1,0 +1,60 @@
+{{define "results_content"}}
+<div class="overflow-x-auto bg-white rounded shadow">
+    <table class="min-w-full text-sm">
+        <thead class="bg-gray-50 border-b">
+            <tr>
+                <th class="px-4 py-2 text-left font-medium text-gray-600">Title</th>
+                <th class="px-4 py-2 text-left font-medium text-gray-600">Status</th>
+                <th class="px-4 py-2 text-left font-medium text-gray-600">Price/Acre</th>
+                <th class="px-4 py-2 text-left font-medium text-gray-600">Acres</th>
+                <th class="px-4 py-2 text-left font-medium text-gray-600">Location</th>
+                <th class="px-4 py-2 text-left font-medium text-gray-600">First Seen</th>
+                <th class="px-4 py-2"></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+            {{range .Rows}}
+            <tr class="hover:bg-gray-50">
+                <td class="px-4 py-2">{{.Title}}</td>
+                <td class="px-4 py-2">
+                    <span class="px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">{{.Status}}</span>
+                </td>
+                <td class="px-4 py-2">{{.PricePerAcre}}</td>
+                <td class="px-4 py-2">{{.Acres}}</td>
+                <td class="px-4 py-2">{{.Location}}</td>
+                <td class="px-4 py-2">{{.FirstSeenDate}}</td>
+                <td class="px-4 py-2">
+                    <a href="/listings/{{.ID}}" class="text-blue-600 hover:underline text-xs">View</a>
+                </td>
+            </tr>
+            {{else}}
+            <tr>
+                <td colspan="7" class="px-4 py-6 text-center text-gray-400 text-sm">No listings match the current filters.</td>
+            </tr>
+            {{end}}
+        </tbody>
+    </table>
+</div>
+{{if or .PrevURL .NextURL}}
+<div class="flex items-center justify-between mt-4">
+    <div>
+        {{if .PrevURL}}
+        <a href="{{.PrevURL}}" hx-get="{{.PrevURL}}" hx-target="#results" hx-push-url="true"
+           class="px-3 py-1 text-sm bg-white border rounded shadow hover:bg-gray-50">← Previous</a>
+        {{end}}
+    </div>
+    <div>
+        {{if .NextURL}}
+        <a href="{{.NextURL}}" hx-get="{{.NextURL}}" hx-target="#results" hx-push-url="true"
+           class="px-3 py-1 text-sm bg-white border rounded shadow hover:bg-gray-50">Next →</a>
+        {{end}}
+    </div>
+</div>
+{{end}}
+<script>
+if (typeof updateMapMarkers === 'function') {
+    updateMapMarkers({{.Markers}});
+}
+</script>
+{{end}}
+{{template "results_content" .}}

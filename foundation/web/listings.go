@@ -2,8 +2,10 @@ package web
 
 import (
 	"context"
+	"encoding/json"
 	"html/template"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -16,9 +18,14 @@ type ListingsQuerier interface {
 	QueryListings(ctx context.Context, limit, offset int) ([]listing.Listing, error)
 	QueryListingByID(ctx context.Context, id string) (listing.Listing, error)
 	QuerySnapshotsByListing(ctx context.Context, listingID string) ([]listing.ListingSnapshot, error)
+	QueryListingsFilter(ctx context.Context, f listing.ListingFilter, limit, offset int) ([]listing.Listing, error)
 }
 
-var listingsTmpl = template.Must(template.ParseFS(templateFS, "templates/listings.html"))
+var listingsTmpl = template.Must(template.ParseFS(templateFS,
+	"templates/listings.html",
+	"templates/listings_results.html",
+))
+var listingsResultsTmpl = template.Must(template.ParseFS(templateFS, "templates/listings_results.html"))
 var listingDetailTmpl = template.Must(template.ParseFS(templateFS, "templates/listing_detail.html"))
 
 type listingRow struct {
@@ -32,14 +39,197 @@ type listingRow struct {
 }
 
 type snapRow struct {
-	CapturedAt  string
-	Status      string
-	Price       string
-	Acres       string
-	Diff        string
+	CapturedAt string
+	Status     string
+	Price      string
+	Acres      string
+	Diff       string
 }
 
-// ListingsHandler serves the paginated listings index.
+type mapMarker struct {
+	Lat   float64 `json:"lat"`
+	Lng   float64 `json:"lng"`
+	Title string  `json:"title"`
+	ID    string  `json:"id"`
+}
+
+type filterForm struct {
+	AcresMin     string
+	AcresMax     string
+	PriceMin     string
+	PriceMax     string
+	Counties     string
+	PropertyType string
+	AttrWater    bool
+	AttrOffGrid  bool
+	AttrPower    bool
+	AttrWell     bool
+	AttrSeptic   bool
+}
+
+func parsePagination(r *http.Request) (limit, offset int) {
+	limit = 50
+	q := r.URL.Query()
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			if n > 200 {
+				n = 200
+			}
+			limit = n
+		}
+	}
+	if v := q.Get("offset"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			offset = n
+		}
+	}
+	return
+}
+
+func parseFilter(r *http.Request) listing.ListingFilter {
+	q := r.URL.Query()
+	var f listing.ListingFilter
+
+	if v := q.Get("acres_min"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			f.AcresMin = &n
+		}
+	}
+	if v := q.Get("acres_max"); v != "" {
+		if n, err := strconv.ParseFloat(v, 64); err == nil {
+			f.AcresMax = &n
+		}
+	}
+	if v := q.Get("price_min"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cents := n * 100
+			f.PriceMin = &cents
+		}
+	}
+	if v := q.Get("price_max"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			cents := n * 100
+			f.PriceMax = &cents
+		}
+	}
+	if v := q.Get("counties"); v != "" {
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				f.Counties = append(f.Counties, p)
+			}
+		}
+	}
+	if v := q.Get("property_type"); v != "" {
+		f.PropertyType = &v
+	}
+	if q.Get("attr_water") == "true" {
+		b := true
+		f.AttrWaterFrontage = &b
+	}
+	if q.Get("attr_off_grid") == "true" {
+		b := true
+		f.AttrOffGrid = &b
+	}
+	if q.Get("attr_power") == "true" {
+		b := true
+		f.AttrPower = &b
+	}
+	if q.Get("attr_well") == "true" {
+		b := true
+		f.AttrWell = &b
+	}
+	if q.Get("attr_septic") == "true" {
+		b := true
+		f.AttrSeptic = &b
+	}
+	return f
+}
+
+func isFilterEmpty(f listing.ListingFilter) bool {
+	return f.AcresMin == nil && f.AcresMax == nil &&
+		f.PriceMin == nil && f.PriceMax == nil &&
+		len(f.Counties) == 0 &&
+		f.PPAMin == nil && f.PPAMax == nil &&
+		f.PropertyType == nil &&
+		f.AttrWaterFrontage == nil &&
+		f.AttrOffGrid == nil &&
+		f.AttrPower == nil &&
+		f.AttrWell == nil &&
+		f.AttrSeptic == nil
+}
+
+func buildFilterForm(r *http.Request) filterForm {
+	q := r.URL.Query()
+	return filterForm{
+		AcresMin:     q.Get("acres_min"),
+		AcresMax:     q.Get("acres_max"),
+		PriceMin:     q.Get("price_min"),
+		PriceMax:     q.Get("price_max"),
+		Counties:     q.Get("counties"),
+		PropertyType: q.Get("property_type"),
+		AttrWater:    q.Get("attr_water") == "true",
+		AttrOffGrid:  q.Get("attr_off_grid") == "true",
+		AttrPower:    q.Get("attr_power") == "true",
+		AttrWell:     q.Get("attr_well") == "true",
+		AttrSeptic:   q.Get("attr_septic") == "true",
+	}
+}
+
+func buildRowsAndMarkers(listings []listing.Listing) ([]listingRow, []mapMarker) {
+	rows := make([]listingRow, len(listings))
+	var markers []mapMarker
+	for i, l := range listings {
+		title := "(untitled)"
+		if l.Title != nil {
+			title = *l.Title
+		}
+		ppa := "n/a"
+		if l.PricePerAcreCents != nil {
+			ppa = formatCents(*l.PricePerAcreCents) + "/acre"
+		}
+		acres := "n/a"
+		if l.Acres != nil {
+			acres = strconv.FormatFloat(*l.Acres, 'f', 2, 64)
+		}
+		var loc []string
+		if l.City != nil && *l.City != "" {
+			loc = append(loc, *l.City)
+		}
+		if l.State != nil && *l.State != "" {
+			loc = append(loc, *l.State)
+		}
+		rows[i] = listingRow{
+			ID:            l.ID,
+			Title:         title,
+			Status:        string(l.Status),
+			PricePerAcre:  ppa,
+			Acres:         acres,
+			Location:      strings.Join(loc, ", "),
+			FirstSeenDate: l.FirstSeenAt.Format("2006-01-02"),
+		}
+		if l.Geom != nil {
+			markers = append(markers, mapMarker{
+				Lat:   l.Geom.Lat,
+				Lng:   l.Geom.Lng,
+				Title: title,
+				ID:    l.ID,
+			})
+		}
+	}
+	return rows, markers
+}
+
+func paginationURL(r *http.Request, limit, offset int) string {
+	q := make(url.Values)
+	for k, v := range r.URL.Query() {
+		q[k] = v
+	}
+	q.Set("limit", strconv.Itoa(limit))
+	q.Set("offset", strconv.Itoa(offset))
+	return "/?" + q.Encode()
+}
+
+// ListingsHandler serves the search + map page, with HTMX partial support.
 func ListingsHandler(q ListingsQuerier) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if q == nil {
@@ -47,65 +237,58 @@ func ListingsHandler(q ListingsQuerier) http.HandlerFunc {
 			return
 		}
 
-		limit := 50
-		offset := 0
+		limit, offset := parsePagination(r)
+		f := parseFilter(r)
+		isHTMX := r.Header.Get("HX-Request") == "true"
 
-		if v := r.URL.Query().Get("limit"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n > 0 {
-				if n > 200 {
-					n = 200
-				}
-				limit = n
-			}
+		var listings []listing.Listing
+		var err error
+		if isFilterEmpty(f) {
+			listings, err = q.QueryListings(r.Context(), limit, offset)
+		} else {
+			listings, err = q.QueryListingsFilter(r.Context(), f, limit, offset)
 		}
-		if v := r.URL.Query().Get("offset"); v != "" {
-			if n, err := strconv.Atoi(v); err == nil && n >= 0 {
-				offset = n
-			}
-		}
-
-		listings, err := q.QueryListings(r.Context(), limit, offset)
 		if err != nil {
 			http.Error(w, "internal server error", http.StatusInternalServerError)
 			return
 		}
 
-		rows := make([]listingRow, len(listings))
-		for i, l := range listings {
-			title := "(untitled)"
-			if l.Title != nil {
-				title = *l.Title
+		rows, markers := buildRowsAndMarkers(listings)
+		markersJSON, _ := json.Marshal(markers)
+		if markersJSON == nil {
+			markersJSON = []byte("[]")
+		}
+
+		hasMore := len(listings) == limit
+		var prevURL, nextURL string
+		if offset > 0 {
+			prev := offset - limit
+			if prev < 0 {
+				prev = 0
 			}
-			ppa := "n/a"
-			if l.PricePerAcreCents != nil {
-				ppa = formatCents(*l.PricePerAcreCents) + "/acre"
-			}
-			acres := "n/a"
-			if l.Acres != nil {
-				acres = strconv.FormatFloat(*l.Acres, 'f', 2, 64)
-			}
-			var loc []string
-			if l.City != nil && *l.City != "" {
-				loc = append(loc, *l.City)
-			}
-			if l.State != nil && *l.State != "" {
-				loc = append(loc, *l.State)
-			}
-			rows[i] = listingRow{
-				ID:            l.ID,
-				Title:         title,
-				Status:        string(l.Status),
-				PricePerAcre:  ppa,
-				Acres:         acres,
-				Location:      strings.Join(loc, ", "),
-				FirstSeenDate: l.FirstSeenAt.Format("2006-01-02"),
-			}
+			prevURL = paginationURL(r, limit, prev)
+		}
+		if hasMore {
+			nextURL = paginationURL(r, limit, offset+limit)
+		}
+
+		data := map[string]any{
+			"Rows":    rows,
+			"Markers": template.JS(markersJSON), //nolint:gosec // JSON from trusted internal data
+			"Filter":  buildFilterForm(r),
+			"Limit":   limit,
+			"Offset":  offset,
+			"HasMore": hasMore,
+			"PrevURL": prevURL,
+			"NextURL": nextURL,
 		}
 
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		listingsTmpl.Execute(w, map[string]any{
-			"Rows": rows,
-		})
+		if isHTMX {
+			listingsResultsTmpl.ExecuteTemplate(w, "results_content", data)
+		} else {
+			listingsTmpl.Execute(w, data)
+		}
 	}
 }
 
