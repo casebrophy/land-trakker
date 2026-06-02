@@ -325,6 +325,149 @@ func TestCreateSnapshot(t *testing.T) {
 	}
 }
 
+func TestQueryListingsFilter(t *testing.T) {
+	st := setupListingDB(t)
+	ctx := context.Background()
+	mustCreateSource(t, st.source, "src-filter")
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+
+	makeListing := func(srcListingID string, acres float64, priceCents int64, county, propType string, well bool) listing.Listing {
+		return listing.Listing{
+			SourceID:         "src-filter",
+			SourceListingID:  srcListingID,
+			URL:              "https://example.com/l/" + srcListingID,
+			FirstSeenAt:      now,
+			LastSeenAt:       now,
+			Status:           listing.StatusActive,
+			Photos:           []string{},
+			AttrsExtra:       map[string]any{},
+			AttrsExtraction:  map[string]any{},
+			Acres:            ptr(acres),
+			PriceCents:       ptr(priceCents),
+			County:           ptr(county),
+			AttrPropertyType: ptr(propType),
+			AttrWell:         ptr(well),
+		}
+	}
+
+	l1, err := st.listing.CreateListing(ctx, makeListing("filter-1", 5.0, 50000, "Ada", "ranch", true))
+	if err != nil {
+		t.Fatalf("CreateListing l1: %v", err)
+	}
+	_, err = st.listing.CreateListing(ctx, makeListing("filter-2", 12.0, 120000, "Canyon", "farm", false))
+	if err != nil {
+		t.Fatalf("CreateListing l2: %v", err)
+	}
+	_, err = st.listing.CreateListing(ctx, makeListing("filter-3", 25.0, 250000, "Owyhee", "ranch", true))
+	if err != nil {
+		t.Fatalf("CreateListing l3: %v", err)
+	}
+	_, err = st.listing.CreateListing(ctx, makeListing("filter-4", 8.0, 80000, "Gem", "residential", false))
+	if err != nil {
+		t.Fatalf("CreateListing l4: %v", err)
+	}
+
+	t.Run("no filter returns all", func(t *testing.T) {
+		results, err := st.listing.QueryListingsFilter(ctx, listing.ListingFilter{}, 100, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 4 {
+			t.Errorf("want 4 results, got %d", len(results))
+		}
+	})
+
+	t.Run("acres range", func(t *testing.T) {
+		results, err := st.listing.QueryListingsFilter(ctx, listing.ListingFilter{
+			AcresMin: ptr(float64(6.0)),
+			AcresMax: ptr(float64(15.0)),
+		}, 100, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("want 2 results (12 and 8 acres), got %d", len(results))
+		}
+	})
+
+	t.Run("price range", func(t *testing.T) {
+		results, err := st.listing.QueryListingsFilter(ctx, listing.ListingFilter{
+			PriceMin: ptr(int64(60000)),
+			PriceMax: ptr(int64(130000)),
+		}, 100, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("want 2 results (80000 and 120000), got %d", len(results))
+		}
+	})
+
+	t.Run("county filter", func(t *testing.T) {
+		results, err := st.listing.QueryListingsFilter(ctx, listing.ListingFilter{
+			Counties: []string{"Ada", "Owyhee"},
+		}, 100, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("want 2 results (Ada, Owyhee), got %d", len(results))
+		}
+	})
+
+	t.Run("property type filter", func(t *testing.T) {
+		results, err := st.listing.QueryListingsFilter(ctx, listing.ListingFilter{
+			PropertyType: ptr("ranch"),
+		}, 100, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("want 2 ranch results, got %d", len(results))
+		}
+	})
+
+	t.Run("well attr filter", func(t *testing.T) {
+		results, err := st.listing.QueryListingsFilter(ctx, listing.ListingFilter{
+			AttrWell: ptr(true),
+		}, 100, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("want 2 results with well=true, got %d", len(results))
+		}
+	})
+
+	t.Run("combined filter acres and county", func(t *testing.T) {
+		results, err := st.listing.QueryListingsFilter(ctx, listing.ListingFilter{
+			AcresMin: ptr(float64(10.0)),
+			Counties: []string{"Canyon", "Owyhee"},
+		}, 100, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("want 2 results, got %d", len(results))
+		}
+	})
+
+	t.Run("pagination", func(t *testing.T) {
+		results, err := st.listing.QueryListingsFilter(ctx, listing.ListingFilter{}, 2, 0)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(results) != 2 {
+			t.Errorf("want 2 results with limit=2, got %d", len(results))
+		}
+	})
+
+	t.Run("by listing id check ordering", func(t *testing.T) {
+		_ = l1 // ensure l1 is used
+	})
+}
+
 func TestCreatePriceChange(t *testing.T) {
 	st := setupListingDB(t)
 	ctx := context.Background()

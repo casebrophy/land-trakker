@@ -160,6 +160,15 @@ func (c *Core) QueryListings(ctx context.Context, limit, offset int) ([]listing.
 	return ls, nil
 }
 
+// QueryListingsFilter returns a paginated list of listings matching the given filter.
+func (c *Core) QueryListingsFilter(ctx context.Context, f listing.ListingFilter, limit, offset int) ([]listing.Listing, error) {
+	ls, err := c.storer.QueryListingsFilter(ctx, f, limit, offset)
+	if err != nil {
+		return nil, fmt.Errorf("querying listings with filter: %w", err)
+	}
+	return ls, nil
+}
+
 // QueryListingByID retrieves a canonical listing by its UUID.
 func (c *Core) QueryListingByID(ctx context.Context, id string) (listing.Listing, error) {
 	l, err := c.storer.QueryListingByID(ctx, id)

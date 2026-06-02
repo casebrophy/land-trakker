@@ -147,6 +147,26 @@ type ParseAttempt struct {
 	SnapshotID    *int64
 }
 
+// ListingFilter holds optional search constraints for QueryListingsFilter.
+// Nil fields are ignored (no constraint applied).
+type ListingFilter struct {
+	AcresMin     *float64
+	AcresMax     *float64
+	PriceMin     *int64 // cents
+	PriceMax     *int64 // cents
+	Counties     []string
+	PPAMin       *int64 // price_per_acre_cents
+	PPAMax       *int64
+	PropertyType *string // matches attr_property_type
+
+	// Boolean attribute filters — nil = no constraint, true/false = must match
+	AttrWaterFrontage *bool
+	AttrOffGrid       *bool
+	AttrPower         *bool
+	AttrWell          *bool
+	AttrSeptic        *bool
+}
+
 // Storer defines the persistence contract for listing-domain objects.
 // Implementations live in storage/listingdb.
 type Storer interface {
@@ -156,6 +176,7 @@ type Storer interface {
 	QueryListingByID(ctx context.Context, id string) (Listing, error)
 	QueryListingBySource(ctx context.Context, sourceID, sourceListingID string) (Listing, error)
 	QueryListings(ctx context.Context, limit, offset int) ([]Listing, error)
+	QueryListingsFilter(ctx context.Context, f ListingFilter, limit, offset int) ([]Listing, error)
 
 	// Snapshot operations
 	CreateSnapshot(ctx context.Context, snap ListingSnapshot) (ListingSnapshot, error)

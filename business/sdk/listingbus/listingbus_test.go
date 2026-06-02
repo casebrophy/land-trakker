@@ -139,6 +139,69 @@ func (f *fakeStore) QueryListings(_ context.Context, limit, offset int) ([]listi
 	return all[offset:end], nil
 }
 
+func (f *fakeStore) QueryListingsFilter(_ context.Context, filter listing.ListingFilter, limit, offset int) ([]listing.Listing, error) {
+	var matched []listing.Listing
+	for _, l := range f.listings {
+		if filter.AcresMin != nil && (l.Acres == nil || *l.Acres < *filter.AcresMin) {
+			continue
+		}
+		if filter.AcresMax != nil && (l.Acres == nil || *l.Acres > *filter.AcresMax) {
+			continue
+		}
+		if filter.PriceMin != nil && (l.PriceCents == nil || *l.PriceCents < *filter.PriceMin) {
+			continue
+		}
+		if filter.PriceMax != nil && (l.PriceCents == nil || *l.PriceCents > *filter.PriceMax) {
+			continue
+		}
+		if len(filter.Counties) > 0 {
+			found := false
+			for _, c := range filter.Counties {
+				if l.County != nil && *l.County == c {
+					found = true
+					break
+				}
+			}
+			if !found {
+				continue
+			}
+		}
+		if filter.PPAMin != nil && (l.PricePerAcreCents == nil || *l.PricePerAcreCents < *filter.PPAMin) {
+			continue
+		}
+		if filter.PPAMax != nil && (l.PricePerAcreCents == nil || *l.PricePerAcreCents > *filter.PPAMax) {
+			continue
+		}
+		if filter.PropertyType != nil && (l.AttrPropertyType == nil || *l.AttrPropertyType != *filter.PropertyType) {
+			continue
+		}
+		if filter.AttrWaterFrontage != nil && (l.AttrWaterFrontage == nil || *l.AttrWaterFrontage != *filter.AttrWaterFrontage) {
+			continue
+		}
+		if filter.AttrOffGrid != nil && (l.AttrOffGrid == nil || *l.AttrOffGrid != *filter.AttrOffGrid) {
+			continue
+		}
+		if filter.AttrPower != nil && (l.AttrPower == nil || *l.AttrPower != *filter.AttrPower) {
+			continue
+		}
+		if filter.AttrWell != nil && (l.AttrWell == nil || *l.AttrWell != *filter.AttrWell) {
+			continue
+		}
+		if filter.AttrSeptic != nil && (l.AttrSeptic == nil || *l.AttrSeptic != *filter.AttrSeptic) {
+			continue
+		}
+		matched = append(matched, l)
+	}
+	if offset >= len(matched) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], nil
+}
+
 func itoa(n int) string {
 	return string(rune('0' + n)) // simple for tests (works up to 9)
 }
@@ -647,5 +710,163 @@ func TestUpsertFromParsed_Geocoding_Error(t *testing.T) {
 	// Upsert should succeed despite geocoding error
 	if got.ID == "" {
 		t.Error("expected listing to be created despite geocoding error")
+	}
+}
+
+// =============================================================================
+// QueryListingsFilter tests
+// =============================================================================
+
+func ptrF(v float64) *float64 { return &v }
+func ptrI(v int64) *int64     { return &v }
+func ptrS(v string) *string   { return &v }
+func ptrB(v bool) *bool       { return &v }
+
+// seedFilterListing inserts a listing directly into the fakeStore.
+func seedFilterListing(store *fakeStore, id string, acres *float64, priceCents *int64, county *string, propType *string, well *bool) {
+	store.nextListSeq++
+	l := listing.Listing{
+		ID:               id,
+		SourceID:         "src-filter",
+		SourceListingID:  id,
+		Status:           listing.StatusActive,
+		FirstSeenAt:      time.Now(),
+		LastSeenAt:       time.Now(),
+		Acres:            acres,
+		PriceCents:       priceCents,
+		County:           county,
+		AttrPropertyType: propType,
+		AttrWell:         well,
+	}
+	store.listings[l.ID] = l
+	store.bySource[store.sourceKey(l.SourceID, l.SourceListingID)] = id
+}
+
+func TestQueryListingsFilter_NoFilter(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	ctx := context.Background()
+
+	seedFilterListing(store, "f1", ptrF(10.0), ptrI(100000), ptrS("Ada"), ptrS("ranch"), ptrB(true))
+	seedFilterListing(store, "f2", ptrF(5.0), ptrI(50000), ptrS("Boise"), ptrS("farm"), ptrB(false))
+	seedFilterListing(store, "f3", ptrF(20.0), ptrI(200000), ptrS("Canyon"), ptrS("residential"), nil)
+
+	results, err := core.QueryListingsFilter(ctx, listing.ListingFilter{}, 100, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 3 {
+		t.Errorf("want 3 results, got %d", len(results))
+	}
+}
+
+func TestQueryListingsFilter_AcresMinMax(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	ctx := context.Background()
+
+	seedFilterListing(store, "f1", ptrF(5.0), ptrI(50000), ptrS("Ada"), nil, nil)
+	seedFilterListing(store, "f2", ptrF(10.0), ptrI(100000), ptrS("Ada"), nil, nil)
+	seedFilterListing(store, "f3", ptrF(20.0), ptrI(200000), ptrS("Ada"), nil, nil)
+
+	results, err := core.QueryListingsFilter(ctx, listing.ListingFilter{
+		AcresMin: ptrF(8.0),
+		AcresMax: ptrF(15.0),
+	}, 100, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("want 1 result (10 acres), got %d", len(results))
+	}
+	if results[0].Acres == nil || *results[0].Acres != 10.0 {
+		t.Errorf("expected 10 acres listing, got %v", results[0].Acres)
+	}
+}
+
+func TestQueryListingsFilter_PriceMinMax(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	ctx := context.Background()
+
+	seedFilterListing(store, "f1", ptrF(5.0), ptrI(30000), ptrS("Ada"), nil, nil)
+	seedFilterListing(store, "f2", ptrF(10.0), ptrI(75000), ptrS("Ada"), nil, nil)
+	seedFilterListing(store, "f3", ptrF(20.0), ptrI(150000), ptrS("Ada"), nil, nil)
+
+	results, err := core.QueryListingsFilter(ctx, listing.ListingFilter{
+		PriceMin: ptrI(50000),
+		PriceMax: ptrI(100000),
+	}, 100, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("want 1 result (75000 cents), got %d", len(results))
+	}
+	if results[0].PriceCents == nil || *results[0].PriceCents != 75000 {
+		t.Errorf("expected 75000 price listing, got %v", results[0].PriceCents)
+	}
+}
+
+func TestQueryListingsFilter_County(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	ctx := context.Background()
+
+	seedFilterListing(store, "f1", ptrF(5.0), ptrI(50000), ptrS("Ada"), nil, nil)
+	seedFilterListing(store, "f2", ptrF(10.0), ptrI(100000), ptrS("Canyon"), nil, nil)
+	seedFilterListing(store, "f3", ptrF(20.0), ptrI(200000), ptrS("Owyhee"), nil, nil)
+
+	results, err := core.QueryListingsFilter(ctx, listing.ListingFilter{
+		Counties: []string{"Ada", "Owyhee"},
+	}, 100, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("want 2 results (Ada, Owyhee), got %d", len(results))
+	}
+}
+
+func TestQueryListingsFilter_PropertyType(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	ctx := context.Background()
+
+	seedFilterListing(store, "f1", ptrF(5.0), ptrI(50000), ptrS("Ada"), ptrS("ranch"), nil)
+	seedFilterListing(store, "f2", ptrF(10.0), ptrI(100000), ptrS("Canyon"), ptrS("farm"), nil)
+	seedFilterListing(store, "f3", ptrF(20.0), ptrI(200000), ptrS("Owyhee"), ptrS("ranch"), nil)
+
+	results, err := core.QueryListingsFilter(ctx, listing.ListingFilter{
+		PropertyType: ptrS("ranch"),
+	}, 100, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("want 2 ranch results, got %d", len(results))
+	}
+}
+
+func TestQueryListingsFilter_AttrWell(t *testing.T) {
+	store := newFakeStore()
+	core := newCore(store)
+	ctx := context.Background()
+
+	seedFilterListing(store, "f1", ptrF(5.0), ptrI(50000), ptrS("Ada"), nil, ptrB(true))
+	seedFilterListing(store, "f2", ptrF(10.0), ptrI(100000), ptrS("Canyon"), nil, ptrB(false))
+	seedFilterListing(store, "f3", ptrF(20.0), ptrI(200000), ptrS("Owyhee"), nil, nil) // no well info
+
+	results, err := core.QueryListingsFilter(ctx, listing.ListingFilter{
+		AttrWell: ptrB(true),
+	}, 100, 0)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(results) != 1 {
+		t.Errorf("want 1 result (well=true), got %d", len(results))
+	}
+	if results[0].AttrWell == nil || !*results[0].AttrWell {
+		t.Errorf("expected well=true listing")
 	}
 }
