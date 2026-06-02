@@ -10,13 +10,13 @@ import (
 	"github.com/cbrophy/land_trakker/foundation/web"
 )
 
-func newRouter(cfg *config.Config, q web.ListingsQuerier, sc web.SearchCore, dq web.DuplicatesQuerier) http.Handler {
+func newRouter(cfg *config.Config, q web.ListingsQuerier, sc web.SearchCore, dq web.DuplicatesQuerier, hq web.HealthQuerier) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
 
 	// Public routes
-	r.Get("/health", web.HealthHandler())
+	r.Get("/health", web.HealthDashboardHandler(hq))
 	r.Get("/login", web.LoginHandler(cfg.Server.AdminPasswordHash, cfg.Server.SessionSecret))
 	r.Post("/login", web.LoginHandler(cfg.Server.AdminPasswordHash, cfg.Server.SessionSecret))
 	r.Get("/logout", web.LogoutHandler())
