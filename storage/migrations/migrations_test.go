@@ -21,6 +21,7 @@ var allTables = []string{
 	"listings",
 	"listing_snapshots",
 	"price_changes",
+	"geocode_cache",
 }
 
 func TestMigrations(t *testing.T) {
