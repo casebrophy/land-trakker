@@ -1,0 +1,28 @@
+{
+  "SourceID": "fakebroker",
+  "SourceListingID": "fixture-2",
+  "URL": "https://fakebroker.local/listing/fixture-2",
+  "Title": "20 Acres - Gem County, Idaho",
+  "Description": "Prime agricultural land in Gem County with road frontage.",
+  "PriceCents": 25000000,
+  "Acres": 20,
+  "Address": {
+    "Street": "5678 Prospect Road",
+    "City": "Emmett",
+    "County": "Gem",
+    "State": "ID",
+    "Zip": "83617"
+  },
+  "County": "Gem",
+  "State": "ID",
+  "Photos": null,
+  "Broker": {
+    "Name": "John Smith",
+    "Phone": "(208) 555-0100",
+    "Email": "john.smith@fakebroker.local"
+  },
+  "StructuredAttrs": {},
+  "PostedAt": null,
+  "UpdatedAt": null,
+  "SourceStatus": ""
+}

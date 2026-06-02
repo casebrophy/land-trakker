@@ -1,0 +1,24 @@
+{
+  "SourceID": "fakebroker",
+  "SourceListingID": "fixture-1",
+  "URL": "https://fakebroker.local/listing/fixture-1",
+  "Title": "40 Acres - Ada County, Idaho",
+  "Description": "Beautiful land parcel in Ada County near Boise. No broker contact available.",
+  "PriceCents": 9500000,
+  "Acres": 40,
+  "Address": {
+    "Street": "1234 Bogus Lane",
+    "City": "Boise",
+    "County": "Ada",
+    "State": "ID",
+    "Zip": "83702"
+  },
+  "County": "Ada",
+  "State": "ID",
+  "Photos": null,
+  "Broker": null,
+  "StructuredAttrs": {},
+  "PostedAt": null,
+  "UpdatedAt": null,
+  "SourceStatus": ""
+}

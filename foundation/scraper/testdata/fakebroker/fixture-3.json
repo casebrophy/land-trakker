@@ -1,0 +1,24 @@
+{
+  "SourceID": "fakebroker",
+  "SourceListingID": "fixture-3",
+  "URL": "https://fakebroker.local/listing/fixture-3",
+  "Title": "100 Acres - Owyhee County, Idaho",
+  "Description": "Large rural parcel with excellent views and water access. No broker contact available.",
+  "PriceCents": 45000000,
+  "Acres": 100,
+  "Address": {
+    "Street": "9876 Rangeland Drive",
+    "City": "Murphy",
+    "County": "Owyhee",
+    "State": "ID",
+    "Zip": "83650"
+  },
+  "County": "Owyhee",
+  "State": "ID",
+  "Photos": null,
+  "Broker": null,
+  "StructuredAttrs": {},
+  "PostedAt": null,
+  "UpdatedAt": null,
+  "SourceStatus": ""
+}
