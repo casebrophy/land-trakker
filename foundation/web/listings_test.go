@@ -172,6 +172,91 @@ func TestListingDetailHandler_withSnapshots(t *testing.T) {
 	}
 }
 
+func TestListingDetailHandler_rendersTimeline(t *testing.T) {
+	listingID := "00000000-0000-0000-0000-000000000006"
+	title := "Mountain Property"
+	price := int64(3000000)
+	acres := 25.5
+
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	snapPrice1 := int64(2800000)
+	snapAcres1 := 25.5
+
+	snapPrice2 := int64(2900000)
+	snapAcres2 := 25.5
+
+	status := "active"
+
+	q := &fakeQuerier{
+		listings: []listing.Listing{
+			{
+				ID:          listingID,
+				SourceID:    "test",
+				Status:      listing.StatusActive,
+				Title:       &title,
+				PriceCents:  &price,
+				Acres:       &acres,
+				FirstSeenAt: now,
+				LastSeenAt:  now,
+			},
+		},
+		snapshots: map[string][]listing.ListingSnapshot{
+			listingID: {
+				{
+					ID:         1,
+					ListingID:  listingID,
+					CapturedAt: now.AddDate(0, 0, -7),
+					PriceCents: &snapPrice1,
+					Acres:      &snapAcres1,
+					Status:     &status,
+				},
+				{
+					ID:         2,
+					ListingID:  listingID,
+					CapturedAt: now,
+					PriceCents: &snapPrice2,
+					Acres:      &snapAcres2,
+					Status:     &status,
+				},
+			},
+		},
+	}
+
+	r := httptest.NewRequest(http.MethodGet, "/listings/"+listingID, nil)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", listingID)
+	r = r.WithContext(context.WithValue(r.Context(), chi.RouteCtxKey, rctx))
+
+	w := httptest.NewRecorder()
+	web.ListingDetailHandler(q).ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+
+	// Verify timeline is present
+	if !strings.Contains(body, "priceTimeline") {
+		t.Fatalf("expected body to contain timeline canvas element")
+	}
+	if !strings.Contains(body, "Price Timeline") {
+		t.Fatalf("expected body to contain 'Price Timeline' heading")
+	}
+
+	// Verify timeline data is embedded
+	if !strings.Contains(body, "28000") {
+		t.Fatalf("expected body to contain first snapshot price data (28000), got:\n%s", body)
+	}
+	if !strings.Contains(body, "29000") {
+		t.Fatalf("expected body to contain second snapshot price data (29000), got:\n%s", body)
+	}
+
+	// Verify Chart.js is loaded
+	if !strings.Contains(body, "chart.umd.js") {
+		t.Fatalf("expected body to include Chart.js CDN")
+	}
+}
+
 func TestListingsHandler_withFilter_callsQueryListingsFilter(t *testing.T) {
 	title := "River Ranch 20 acres"
 	q := &fakeQuerier{
