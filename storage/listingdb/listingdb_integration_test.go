@@ -518,3 +518,124 @@ func TestCreatePriceChange(t *testing.T) {
 		t.Errorf("NewPriceCents: got %d", pcs[0].NewPriceCents)
 	}
 }
+
+func TestAuctionExtensionRoundTrip(t *testing.T) {
+	st := setupListingDB(t)
+	ctx := context.Background()
+	mustCreateSource(t, st.source, "src-auction")
+
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	auctionEndDate := now.AddDate(0, 1, 0) // 1 month from now
+	auctionBid := int64(500000)              // 5000.00 in cents
+	auctionReserve := int64(400000)          // 4000.00 in cents
+
+	l := listing.Listing{
+		SourceID:          "src-auction",
+		SourceListingID:   "listing-auction-1",
+		URL:               "https://example.com/l/auction",
+		FirstSeenAt:       now,
+		LastSeenAt:        now,
+		Status:            listing.StatusActive,
+		Photos:            []string{},
+		AttrsExtra:        map[string]any{},
+		AttrsExtraction:   map[string]any{},
+		AuctionEndDate:    &auctionEndDate,
+		AuctionCurrentBid: &auctionBid,
+		AuctionReserve:    &auctionReserve,
+	}
+
+	created, err := st.listing.CreateListing(ctx, l)
+	if err != nil {
+		t.Fatalf("CreateListing: %v", err)
+	}
+
+	// Verify auction fields were set on creation
+	if created.AuctionEndDate == nil {
+		t.Error("expected AuctionEndDate to be set on creation")
+	}
+	if created.AuctionCurrentBid == nil || *created.AuctionCurrentBid != auctionBid {
+		t.Errorf("AuctionCurrentBid mismatch on creation: got %v", created.AuctionCurrentBid)
+	}
+	if created.AuctionReserve == nil || *created.AuctionReserve != auctionReserve {
+		t.Errorf("AuctionReserve mismatch on creation: got %v", created.AuctionReserve)
+	}
+
+	// Query by ID and verify round-trip
+	fetched, err := st.listing.QueryListingByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("QueryListingByID: %v", err)
+	}
+	if fetched.AuctionEndDate == nil {
+		t.Fatal("expected AuctionEndDate to be set after QueryListingByID")
+	}
+	if fetched.AuctionEndDate.Unix() != auctionEndDate.Unix() {
+		t.Errorf("AuctionEndDate mismatch: got %v want %v", fetched.AuctionEndDate, auctionEndDate)
+	}
+	if fetched.AuctionCurrentBid == nil || *fetched.AuctionCurrentBid != auctionBid {
+		t.Errorf("AuctionCurrentBid mismatch: got %v want %d", fetched.AuctionCurrentBid, auctionBid)
+	}
+	if fetched.AuctionReserve == nil || *fetched.AuctionReserve != auctionReserve {
+		t.Errorf("AuctionReserve mismatch: got %v want %d", fetched.AuctionReserve, auctionReserve)
+	}
+
+	// Test Auction() method
+	auctionInfo := fetched.Auction()
+	if auctionInfo == nil {
+		t.Fatal("expected Auction() to return non-nil AuctionInfo")
+	}
+	if auctionInfo.EndDate == nil || auctionInfo.EndDate.Unix() != auctionEndDate.Unix() {
+		t.Errorf("Auction().EndDate mismatch: got %v want %v", auctionInfo.EndDate, auctionEndDate)
+	}
+	if auctionInfo.CurrentBid == nil || *auctionInfo.CurrentBid != auctionBid {
+		t.Errorf("Auction().CurrentBid mismatch: got %v want %d", auctionInfo.CurrentBid, auctionBid)
+	}
+	if auctionInfo.Reserve == nil || *auctionInfo.Reserve != auctionReserve {
+		t.Errorf("Auction().Reserve mismatch: got %v want %d", auctionInfo.Reserve, auctionReserve)
+	}
+
+	// Test update
+	newBid := int64(600000)
+	fetched.AuctionCurrentBid = &newBid
+	if err := st.listing.UpdateListing(ctx, fetched); err != nil {
+		t.Fatalf("UpdateListing: %v", err)
+	}
+
+	updated, err := st.listing.QueryListingByID(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("QueryListingByID after update: %v", err)
+	}
+	if updated.AuctionCurrentBid == nil || *updated.AuctionCurrentBid != newBid {
+		t.Errorf("AuctionCurrentBid mismatch after update: got %v want %d", updated.AuctionCurrentBid, newBid)
+	}
+
+	// Test listing without auction fields
+	l2 := listing.Listing{
+		SourceID:        "src-auction",
+		SourceListingID: "listing-no-auction",
+		URL:             "https://example.com/l/no-auction",
+		FirstSeenAt:     now,
+		LastSeenAt:      now,
+		Status:          listing.StatusActive,
+		Photos:          []string{},
+		AttrsExtra:      map[string]any{},
+		AttrsExtraction: map[string]any{},
+	}
+	created2, err := st.listing.CreateListing(ctx, l2)
+	if err != nil {
+		t.Fatalf("CreateListing for no-auction listing: %v", err)
+	}
+	if created2.AuctionEndDate != nil || created2.AuctionCurrentBid != nil || created2.AuctionReserve != nil {
+		t.Error("expected no auction fields for listing without auction data")
+	}
+
+	fetched2, err := st.listing.QueryListingByID(ctx, created2.ID)
+	if err != nil {
+		t.Fatalf("QueryListingByID for no-auction listing: %v", err)
+	}
+	if fetched2.AuctionEndDate != nil || fetched2.AuctionCurrentBid != nil || fetched2.AuctionReserve != nil {
+		t.Error("expected no auction fields after QueryListingByID for no-auction listing")
+	}
+	if auctionInfo := fetched2.Auction(); auctionInfo != nil {
+		t.Error("expected Auction() to return nil for listing without auction data")
+	}
+}

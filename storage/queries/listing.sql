@@ -130,3 +130,19 @@ ORDER BY changed_at DESC;
 INSERT INTO parse_attempts (raw_fetch_id, parser_version, attempted_at, outcome, error_message, snapshot_id)
 VALUES (@raw_fetch_id, @parser_version, @attempted_at, @outcome, sqlc.narg('error_message'), sqlc.narg('snapshot_id'))
 RETURNING *;
+
+-- name: CreateAuctionExt :exec
+INSERT INTO auction_extension (listing_id, auction_end_date, auction_current_bid, auction_reserve)
+VALUES (@listing_id::uuid, sqlc.narg('auction_end_date'), sqlc.narg('auction_current_bid'), sqlc.narg('auction_reserve'));
+
+-- name: GetAuctionExt :one
+SELECT id, listing_id, auction_end_date, auction_current_bid, auction_reserve
+FROM auction_extension
+WHERE listing_id = @listing_id::uuid;
+
+-- name: UpdateAuctionExt :exec
+UPDATE auction_extension
+SET auction_end_date = sqlc.narg('auction_end_date'),
+    auction_current_bid = sqlc.narg('auction_current_bid'),
+    auction_reserve = sqlc.narg('auction_reserve')
+WHERE listing_id = @listing_id::uuid;

@@ -11,6 +11,28 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const createAuctionExt = `-- name: CreateAuctionExt :exec
+INSERT INTO auction_extension (listing_id, auction_end_date, auction_current_bid, auction_reserve)
+VALUES ($1::uuid, $2, $3, $4)
+`
+
+type CreateAuctionExtParams struct {
+	ListingID         pgtype.UUID
+	AuctionEndDate    pgtype.Timestamptz
+	AuctionCurrentBid pgtype.Int8
+	AuctionReserve    pgtype.Int8
+}
+
+func (q *Queries) CreateAuctionExt(ctx context.Context, arg CreateAuctionExtParams) error {
+	_, err := q.db.Exec(ctx, createAuctionExt,
+		arg.ListingID,
+		arg.AuctionEndDate,
+		arg.AuctionCurrentBid,
+		arg.AuctionReserve,
+	)
+	return err
+}
+
 const createListing = `-- name: CreateListing :one
 INSERT INTO listings (
     source_id, source_listing_id, url, first_seen_at, last_seen_at,
@@ -337,6 +359,25 @@ func (q *Queries) CreatePriceChange(ctx context.Context, arg CreatePriceChangePa
 	return i, err
 }
 
+const getAuctionExt = `-- name: GetAuctionExt :one
+SELECT id, listing_id, auction_end_date, auction_current_bid, auction_reserve
+FROM auction_extension
+WHERE listing_id = $1::uuid
+`
+
+func (q *Queries) GetAuctionExt(ctx context.Context, listingID pgtype.UUID) (AuctionExtension, error) {
+	row := q.db.QueryRow(ctx, getAuctionExt, listingID)
+	var i AuctionExtension
+	err := row.Scan(
+		&i.ID,
+		&i.ListingID,
+		&i.AuctionEndDate,
+		&i.AuctionCurrentBid,
+		&i.AuctionReserve,
+	)
+	return i, err
+}
+
 const getListingByID = `-- name: GetListingByID :one
 SELECT
     id, source_id, source_listing_id, url, first_seen_at, last_seen_at,
@@ -611,6 +652,31 @@ func (q *Queries) ListSnapshotsByListing(ctx context.Context, listingID pgtype.U
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateAuctionExt = `-- name: UpdateAuctionExt :exec
+UPDATE auction_extension
+SET auction_end_date = $1,
+    auction_current_bid = $2,
+    auction_reserve = $3
+WHERE listing_id = $4::uuid
+`
+
+type UpdateAuctionExtParams struct {
+	AuctionEndDate    pgtype.Timestamptz
+	AuctionCurrentBid pgtype.Int8
+	AuctionReserve    pgtype.Int8
+	ListingID         pgtype.UUID
+}
+
+func (q *Queries) UpdateAuctionExt(ctx context.Context, arg UpdateAuctionExtParams) error {
+	_, err := q.db.Exec(ctx, updateAuctionExt,
+		arg.AuctionEndDate,
+		arg.AuctionCurrentBid,
+		arg.AuctionReserve,
+		arg.ListingID,
+	)
+	return err
 }
 
 const updateListing = `-- name: UpdateListing :exec

@@ -41,6 +41,13 @@ type Point struct {
 	Lng float64
 }
 
+// AuctionInfo holds optional auction details for a listing.
+type AuctionInfo struct {
+	EndDate   *time.Time
+	CurrentBid *int64 // cents
+	Reserve    *int64 // cents
+}
+
 // Listing is the canonical record for a land listing, aggregated across
 // one or more scrape runs from a single source.
 type Listing struct {
@@ -95,6 +102,11 @@ type Listing struct {
 	AttrPropertyType  *string
 	AttrsExtra        map[string]any
 	AttrsExtraction   map[string]any
+
+	// Auction fields (optional)
+	AuctionEndDate   *time.Time
+	AuctionCurrentBid *int64 // cents
+	AuctionReserve   *int64 // cents
 }
 
 // ListingSnapshot captures the parsed state of a listing at a point in time.
@@ -184,6 +196,18 @@ type PossibleDuplicate struct {
 	Reasons      []string
 	DetectedAt   time.Time
 	UserDecision *string
+}
+
+// Auction returns AuctionInfo if any auction field is set, nil otherwise.
+func (l *Listing) Auction() *AuctionInfo {
+	if l.AuctionEndDate == nil && l.AuctionCurrentBid == nil && l.AuctionReserve == nil {
+		return nil
+	}
+	return &AuctionInfo{
+		EndDate:    l.AuctionEndDate,
+		CurrentBid: l.AuctionCurrentBid,
+		Reserve:    l.AuctionReserve,
+	}
 }
 
 // Storer defines the persistence contract for listing-domain objects.

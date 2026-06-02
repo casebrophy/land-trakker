@@ -8,6 +8,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+type AuctionExtension struct {
+	ID                int64
+	ListingID         pgtype.UUID
+	AuctionEndDate    pgtype.Timestamptz
+	AuctionCurrentBid pgtype.Int8
+	AuctionReserve    pgtype.Int8
+}
+
+type GeocodeCache struct {
+	ID         int64
+	AddressKey string
+	Geom       pgtype.Text
+	Precision  string
+	Provider   string
+	Confidence pgtype.Numeric
+	Raw        []byte
+	CachedAt   pgtype.Timestamptz
+}
+
 type Listing struct {
 	ID                pgtype.UUID
 	SourceID          string
@@ -72,6 +91,15 @@ type ParseAttempt struct {
 	SnapshotID    pgtype.Int8
 }
 
+type PossibleDuplicate struct {
+	ListingAID   pgtype.UUID
+	ListingBID   pgtype.UUID
+	Score        pgtype.Numeric
+	Reasons      []string
+	DetectedAt   pgtype.Timestamptz
+	UserDecision pgtype.Text
+}
+
 type PriceChange struct {
 	ID            int64
 	ListingID     pgtype.UUID
@@ -96,6 +124,14 @@ type RawFetch struct {
 	HeadersJson     []byte
 }
 
+type SavedSearch struct {
+	ID        pgtype.UUID
+	Name      string
+	Query     []byte
+	CreatedAt pgtype.Timestamptz
+	Enabled   bool
+}
+
 type ScrapeRun struct {
 	ID              int64
 	SourceID        string
@@ -108,6 +144,15 @@ type ScrapeRun struct {
 	ErrorCount      pgtype.Int4
 	ErrorSample     pgtype.Text
 	Notes           pgtype.Text
+}
+
+type SearchHit struct {
+	ID            int64
+	SavedSearchID pgtype.UUID
+	ListingID     pgtype.UUID
+	HitAt         pgtype.Timestamptz
+	Reason        string
+	Seen          bool
 }
 
 type Source struct {

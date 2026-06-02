@@ -77,7 +77,22 @@ func (s *Store) CreateListing(ctx context.Context, l listing.Listing) (listing.L
 	if err != nil {
 		return listing.Listing{}, fmt.Errorf("listingdb.CreateListing: %w", err)
 	}
-	return createRowToListing(row)
+	result, err := createRowToListing(row)
+	if err != nil {
+		return listing.Listing{}, err
+	}
+
+	// Populate auction fields if they exist
+	if l.AuctionEndDate != nil || l.AuctionCurrentBid != nil || l.AuctionReserve != nil {
+		if err := s.CreateAuctionExt(ctx, result.ID, l.AuctionEndDate, l.AuctionCurrentBid, l.AuctionReserve); err != nil {
+			return listing.Listing{}, err
+		}
+		result.AuctionEndDate = l.AuctionEndDate
+		result.AuctionCurrentBid = l.AuctionCurrentBid
+		result.AuctionReserve = l.AuctionReserve
+	}
+
+	return result, nil
 }
 
 func (s *Store) UpdateListing(ctx context.Context, l listing.Listing) error {
@@ -131,6 +146,27 @@ func (s *Store) UpdateListing(ctx context.Context, l listing.Listing) error {
 	if err != nil {
 		return fmt.Errorf("listingdb.UpdateListing: %w", err)
 	}
+
+	// Update auction fields if they exist; otherwise, leave as-is
+	if l.AuctionEndDate != nil || l.AuctionCurrentBid != nil || l.AuctionReserve != nil {
+		// Check if auction extension exists
+		existing, err := s.getAuctionExtByListingID(ctx, l.ID)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			// Update existing
+			if err := s.UpdateAuctionExt(ctx, l.ID, l.AuctionEndDate, l.AuctionCurrentBid, l.AuctionReserve); err != nil {
+				return err
+			}
+		} else {
+			// Create new
+			if err := s.CreateAuctionExt(ctx, l.ID, l.AuctionEndDate, l.AuctionCurrentBid, l.AuctionReserve); err != nil {
+				return err
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -139,7 +175,23 @@ func (s *Store) QueryListingByID(ctx context.Context, id string) (listing.Listin
 	if err != nil {
 		return listing.Listing{}, fmt.Errorf("listingdb.QueryListingByID: %w", err)
 	}
-	return getByIDRowToListing(row)
+	result, err := getByIDRowToListing(row)
+	if err != nil {
+		return listing.Listing{}, err
+	}
+
+	// Populate auction fields if they exist
+	auctionExt, err := s.getAuctionExtByListingID(ctx, id)
+	if err != nil {
+		return listing.Listing{}, err
+	}
+	if auctionExt != nil {
+		result.AuctionEndDate = auctionExt.endDate
+		result.AuctionCurrentBid = auctionExt.currentBid
+		result.AuctionReserve = auctionExt.reserve
+	}
+
+	return result, nil
 }
 
 func (s *Store) QueryListingBySource(ctx context.Context, sourceID, sourceListingID string) (listing.Listing, error) {
@@ -150,7 +202,23 @@ func (s *Store) QueryListingBySource(ctx context.Context, sourceID, sourceListin
 	if err != nil {
 		return listing.Listing{}, fmt.Errorf("listingdb.QueryListingBySource: %w", err)
 	}
-	return getBySourceRowToListing(row)
+	result, err := getBySourceRowToListing(row)
+	if err != nil {
+		return listing.Listing{}, err
+	}
+
+	// Populate auction fields if they exist
+	auctionExt, err := s.getAuctionExtByListingID(ctx, result.ID)
+	if err != nil {
+		return listing.Listing{}, err
+	}
+	if auctionExt != nil {
+		result.AuctionEndDate = auctionExt.endDate
+		result.AuctionCurrentBid = auctionExt.currentBid
+		result.AuctionReserve = auctionExt.reserve
+	}
+
+	return result, nil
 }
 
 func (s *Store) CreateSnapshot(ctx context.Context, snap listing.ListingSnapshot) (listing.ListingSnapshot, error) {
@@ -257,6 +325,7 @@ func (s *Store) QueryListings(ctx context.Context, limit, offset int) ([]listing
 	}
 	defer rows.Close()
 	var out []listing.Listing
+	var listingIDs []string
 	for rows.Next() {
 		var r db.GetListingByIDRow
 		if err := rows.Scan(
@@ -305,8 +374,28 @@ func (s *Store) QueryListings(ctx context.Context, limit, offset int) ([]listing
 			return nil, fmt.Errorf("listingdb.QueryListings: convert: %w", err)
 		}
 		out = append(out, l)
+		listingIDs = append(listingIDs, l.ID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Batch-load auction extensions
+	if len(listingIDs) > 0 {
+		auctionExts, err := s.getAuctionExtByListingIDs(ctx, listingIDs)
+		if err != nil {
+			return nil, err
+		}
+		for i := range out {
+			if auctionExt, ok := auctionExts[out[i].ID]; ok {
+				out[i].AuctionEndDate = auctionExt.endDate
+				out[i].AuctionCurrentBid = auctionExt.currentBid
+				out[i].AuctionReserve = auctionExt.reserve
+			}
+		}
+	}
+
+	return out, nil
 }
 
 func (s *Store) QueryListingsFilter(ctx context.Context, f listing.ListingFilter, limit, offset int) ([]listing.Listing, error) {
@@ -388,6 +477,7 @@ func (s *Store) QueryListingsFilter(ctx context.Context, f listing.ListingFilter
 	}
 	defer rows.Close()
 	var out []listing.Listing
+	var listingIDs []string
 	for rows.Next() {
 		var r db.GetListingByIDRow
 		if err := rows.Scan(
@@ -436,8 +526,28 @@ func (s *Store) QueryListingsFilter(ctx context.Context, f listing.ListingFilter
 			return nil, fmt.Errorf("listingdb.QueryListingsFilter: convert: %w", err)
 		}
 		out = append(out, l)
+		listingIDs = append(listingIDs, l.ID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Batch-load auction extensions
+	if len(listingIDs) > 0 {
+		auctionExts, err := s.getAuctionExtByListingIDs(ctx, listingIDs)
+		if err != nil {
+			return nil, err
+		}
+		for i := range out {
+			if auctionExt, ok := auctionExts[out[i].ID]; ok {
+				out[i].AuctionEndDate = auctionExt.endDate
+				out[i].AuctionCurrentBid = auctionExt.currentBid
+				out[i].AuctionReserve = auctionExt.reserve
+			}
+		}
+	}
+
+	return out, nil
 }
 
 func (s *Store) QueryEligibleRawFetchIDs(ctx context.Context, sourceID string, parserVersion string) ([]int64, error) {
@@ -843,6 +953,7 @@ func (s *Store) QueryListingsForDedup(ctx context.Context) ([]listing.Listing, e
 	}
 	defer rows.Close()
 	var out []listing.Listing
+	var listingIDs []string
 	for rows.Next() {
 		var r db.GetListingByIDRow
 		if err := rows.Scan(
@@ -891,8 +1002,28 @@ func (s *Store) QueryListingsForDedup(ctx context.Context) ([]listing.Listing, e
 			return nil, fmt.Errorf("listingdb.QueryListingsForDedup: convert: %w", err)
 		}
 		out = append(out, l)
+		listingIDs = append(listingIDs, l.ID)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// Batch-load auction extensions
+	if len(listingIDs) > 0 {
+		auctionExts, err := s.getAuctionExtByListingIDs(ctx, listingIDs)
+		if err != nil {
+			return nil, err
+		}
+		for i := range out {
+			if auctionExt, ok := auctionExts[out[i].ID]; ok {
+				out[i].AuctionEndDate = auctionExt.endDate
+				out[i].AuctionCurrentBid = auctionExt.currentBid
+				out[i].AuctionReserve = auctionExt.reserve
+			}
+		}
+	}
+
+	return out, nil
 }
 
 func (s *Store) UpsertPossibleDuplicate(ctx context.Context, pd listing.PossibleDuplicate) error {
@@ -965,6 +1096,119 @@ func (s *Store) UpdateDuplicateDecision(ctx context.Context, aID, bID string, de
 		return fmt.Errorf("listingdb.UpdateDuplicateDecision: %w", err)
 	}
 	return nil
+}
+
+// CreateAuctionExt creates an auction_extension record for a listing.
+func (s *Store) CreateAuctionExt(ctx context.Context, listingID string, endDate *time.Time, currentBid, reserve *int64) error {
+	err := s.queries.CreateAuctionExt(ctx, db.CreateAuctionExtParams{
+		ListingID:         strToUUID(listingID),
+		AuctionEndDate:    timePtrToTZ(endDate),
+		AuctionCurrentBid: int64PtrToInt8(currentBid),
+		AuctionReserve:    int64PtrToInt8(reserve),
+	})
+	if err != nil {
+		return fmt.Errorf("listingdb.CreateAuctionExt: %w", err)
+	}
+	return nil
+}
+
+// UpdateAuctionExt updates an auction_extension record for a listing.
+func (s *Store) UpdateAuctionExt(ctx context.Context, listingID string, endDate *time.Time, currentBid, reserve *int64) error {
+	err := s.queries.UpdateAuctionExt(ctx, db.UpdateAuctionExtParams{
+		ListingID:         strToUUID(listingID),
+		AuctionEndDate:    timePtrToTZ(endDate),
+		AuctionCurrentBid: int64PtrToInt8(currentBid),
+		AuctionReserve:    int64PtrToInt8(reserve),
+	})
+	if err != nil {
+		return fmt.Errorf("listingdb.UpdateAuctionExt: %w", err)
+	}
+	return nil
+}
+
+// getAuctionExtByListingID retrieves auction_extension data for a listing.
+// Returns nil if no row found (not an error).
+func (s *Store) getAuctionExtByListingID(ctx context.Context, listingID string) (*struct {
+	endDate   *time.Time
+	currentBid *int64
+	reserve   *int64
+}, error) {
+	row, err := s.queries.GetAuctionExt(ctx, strToUUID(listingID))
+	if err != nil {
+		// No auction extension found; return nil, not an error
+		if err.Error() == "no rows in result set" {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("listingdb.getAuctionExtByListingID: %w", err)
+	}
+	return &struct {
+		endDate   *time.Time
+		currentBid *int64
+		reserve   *int64
+	}{
+		endDate:    tzToTimePtr(row.AuctionEndDate),
+		currentBid: int8ToInt64Ptr(row.AuctionCurrentBid),
+		reserve:    int8ToInt64Ptr(row.AuctionReserve),
+	}, nil
+}
+
+// getAuctionExtByListingIDs batch-loads auction_extension data for multiple listing IDs.
+// Returns a map of listing ID to auction data.
+func (s *Store) getAuctionExtByListingIDs(ctx context.Context, listingIDs []string) (map[string]struct {
+	endDate   *time.Time
+	currentBid *int64
+	reserve   *int64
+}, error) {
+	if len(listingIDs) == 0 {
+		return map[string]struct {
+			endDate   *time.Time
+			currentBid *int64
+			reserve   *int64
+		}{}, nil
+	}
+
+	const q = `
+		SELECT listing_id, auction_end_date, auction_current_bid, auction_reserve
+		FROM auction_extension
+		WHERE listing_id = ANY($1::uuid[])`
+
+	var uuids []string
+	for _, id := range listingIDs {
+		uuids = append(uuids, id)
+	}
+
+	rows, err := s.pool.Query(ctx, q, uuids)
+	if err != nil {
+		return nil, fmt.Errorf("listingdb.getAuctionExtByListingIDs: %w", err)
+	}
+	defer rows.Close()
+
+	result := make(map[string]struct {
+		endDate   *time.Time
+		currentBid *int64
+		reserve   *int64
+	})
+
+	for rows.Next() {
+		var listingID pgtype.UUID
+		var auctionEndDate pgtype.Timestamptz
+		var auctionCurrentBid pgtype.Int8
+		var auctionReserve pgtype.Int8
+		if err := rows.Scan(&listingID, &auctionEndDate, &auctionCurrentBid, &auctionReserve); err != nil {
+			return nil, fmt.Errorf("listingdb.getAuctionExtByListingIDs: scan: %w", err)
+		}
+		id := uuidToStr(listingID.Bytes)
+		result[id] = struct {
+			endDate   *time.Time
+			currentBid *int64
+			reserve   *int64
+		}{
+			endDate:    tzToTimePtr(auctionEndDate),
+			currentBid: int8ToInt64Ptr(auctionCurrentBid),
+			reserve:    int8ToInt64Ptr(auctionReserve),
+		}
+	}
+	return result, rows.Err()
 }
 
 var _ listing.Storer = (*Store)(nil)

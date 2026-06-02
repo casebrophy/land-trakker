@@ -77,4 +77,8 @@ type ParsedListing struct {
 	PostedAt        *time.Time
 	UpdatedAt       *time.Time
 	SourceStatus    string
+	// Auction fields (optional, all three are pointers)
+	AuctionEndDate   *time.Time
+	AuctionCurrentBid *int64 // cents
+	AuctionReserve   *int64 // cents
 }
