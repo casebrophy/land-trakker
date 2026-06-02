@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Land Trakker — Listing Detail</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.js"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
     <nav class="bg-white shadow mb-6">
@@ -25,6 +26,13 @@
                 <div><dt class="font-medium text-gray-500">Address</dt><dd>{{.Address}}</dd></div>
                 <div class="col-span-2"><dt class="font-medium text-gray-500">URL</dt><dd><a href="{{.URL}}" class="text-blue-600 hover:underline break-all" target="_blank">{{.URL}}</a></dd></div>
             </dl>
+        </div>
+
+        <h3 class="text-lg font-semibold mb-3">Price Timeline</h3>
+        <div class="bg-white rounded shadow p-6 mb-6">
+            <div style="position: relative; height: 400px;">
+                <canvas id="priceTimeline"></canvas>
+            </div>
         </div>
 
         <h3 class="text-lg font-semibold mb-3">Snapshot History</h3>
@@ -53,5 +61,109 @@
             </table>
         </div>
     </div>
+
+    <script>
+        // Initialize price timeline chart
+        const timelineData = {{.Timeline}};
+        if (timelineData && timelineData.points && timelineData.points.length > 0) {
+            const ctx = document.getElementById('priceTimeline').getContext('2d');
+            const dates = timelineData.points.map(p => p.date);
+            const prices = timelineData.points.map(p => p.price > 0 ? p.price : null);
+            const acres = timelineData.points.map(p => p.acres > 0 ? p.acres : null);
+
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: [
+                        {
+                            label: 'Price ($)',
+                            data: prices,
+                            borderColor: '#2563eb',
+                            backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                            fill: true,
+                            yAxisID: 'y',
+                            tension: 0.3,
+                            pointRadius: 4,
+                            pointBackgroundColor: '#2563eb',
+                            pointBorderColor: '#fff',
+                            pointBorderWidth: 2,
+                        },
+                        {
+                            label: 'Acres',
+                            data: acres,
+                            borderColor: '#16a34a',
+                            backgroundColor: 'rgba(22, 163, 74, 0.1)',
+                            fill: true,
+                            yAxisID: 'y1',
+                            tension: 0.3,
+                            pointRadius: 4,
+                            pointBackgroundColor: '#16a34a',
+                            pointBorderColor: '#fff',
+                            pointBorderWidth: 2,
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                        },
+                        title: {
+                            display: false,
+                        }
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            display: true,
+                            position: 'left',
+                            title: {
+                                display: true,
+                                text: 'Price ($)',
+                                color: '#2563eb',
+                                font: {
+                                    weight: 'bold'
+                                }
+                            },
+                            ticks: {
+                                callback: function(value) {
+                                    if (value > 1000000) {
+                                        return '$' + (value / 1000000).toFixed(1) + 'M';
+                                    } else if (value > 1000) {
+                                        return '$' + (value / 1000).toFixed(0) + 'K';
+                                    }
+                                    return '$' + value.toLocaleString();
+                                }
+                            }
+                        },
+                        y1: {
+                            type: 'linear',
+                            display: true,
+                            position: 'right',
+                            title: {
+                                display: true,
+                                text: 'Acres',
+                                color: '#16a34a',
+                                font: {
+                                    weight: 'bold'
+                                }
+                            },
+                            grid: {
+                                drawOnChartArea: false,
+                            },
+                        }
+                    }
+                }
+            });
+        }
+    </script>
 </body>
 </html>

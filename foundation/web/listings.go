@@ -46,6 +46,16 @@ type snapRow struct {
 	Diff       string
 }
 
+type timelineDataPoint struct {
+	Date  string  `json:"date"`
+	Price float64 `json:"price"`
+	Acres float64 `json:"acres"`
+}
+
+type timelineData struct {
+	Points []timelineDataPoint `json:"points"`
+}
+
 type mapMarker struct {
 	Lat   float64 `json:"lat"`
 	Lng   float64 `json:"lng"`
@@ -319,6 +329,7 @@ func ListingDetailHandler(q ListingsQuerier) http.HandlerFunc {
 		}
 
 		srows := make([]snapRow, len(snaps))
+		timeline := timelineData{Points: make([]timelineDataPoint, 0)}
 		for i, s := range snaps {
 			status := "n/a"
 			if s.Status != nil {
@@ -347,6 +358,20 @@ func ListingDetailHandler(q ListingsQuerier) http.HandlerFunc {
 				Acres:      acres,
 				Diff:       diff,
 			}
+
+			// Build timeline data point
+			if s.PriceCents != nil || s.Acres != nil {
+				point := timelineDataPoint{
+					Date: s.CapturedAt.Format("2006-01-02"),
+				}
+				if s.PriceCents != nil {
+					point.Price = float64(*s.PriceCents) / 100
+				}
+				if s.Acres != nil {
+					point.Acres = *s.Acres
+				}
+				timeline.Points = append(timeline.Points, point)
+			}
 		}
 
 		title := "(untitled)"
@@ -372,16 +397,18 @@ func ListingDetailHandler(q ListingsQuerier) http.HandlerFunc {
 			addrParts = append(addrParts, *l.State)
 		}
 
+		timelineJSON, _ := json.Marshal(timeline)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		listingDetailTmpl.Execute(w, map[string]any{
-			"ID":      l.ID,
-			"Title":   title,
-			"URL":     l.URL,
-			"Status":  string(l.Status),
-			"Price":   price,
-			"Acres":   acres,
-			"Address": strings.Join(addrParts, ", "),
-			"Snaps":   srows,
+			"ID":       l.ID,
+			"Title":    title,
+			"URL":      l.URL,
+			"Status":   string(l.Status),
+			"Price":    price,
+			"Acres":    acres,
+			"Address":  strings.Join(addrParts, ", "),
+			"Snaps":    srows,
+			"Timeline": template.JS(timelineJSON), //nolint:gosec // JSON from trusted internal data
 		})
 	}
 }
