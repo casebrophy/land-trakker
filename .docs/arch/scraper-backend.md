@@ -131,6 +131,21 @@ func DiffRefs(prev, curr []string) (added, kept, removed []string)
 - `Fetch()`: returns hardcoded HTML bodies
 - `Parse()`: extracts mock fields (title, price, address, broker)
 
+### TestFixtures (Phase 6 Fixture Test Harness)
+```go
+type FixtureResult struct {
+    Name    string  // fixture filename without extension
+    Matched bool    // true if Parse output matches expected JSON
+    Error   string  // error message if mismatch
+}
+
+func TestFixtures(t *testing.T, scraper Scraper) []FixtureResult
+```
+- **Load mechanism**: scans `testdata/<sourceID>/` (relative to test execution CWD) for paired `*.html` + `*.json` files (e.g., `foundation/scraper/testdata/fakebroker/fixture-1.html`, `fixture-1.json`)
+- **Execution**: reads HTML as `RawFetch.Body`, loads JSON as expected `ParsedListing`, calls `Parse()`, compares via JSON marshal round-trip
+- **Results**: returns `[]FixtureResult` in lexicographic order by fixture name; failures show detailed mismatches
+- **Auto-discovery**: TestFixtures() auto-discovers all fixture pairs without explicit registration; fixtures are sorted and tested in order
+
 ---
 
 ## Dependencies
@@ -200,9 +215,32 @@ All errors are non-fatal; run completes with error counts and Partial/Failed sta
 - **`scraper_test.go`**: Scraper interface, RateLimiter behavior (transient retry, jitter)
 - **`orchestrator_test.go`**: RunOnce pipeline, diff logic, TTL, missed-run handler, parse errors
 - **`rate_limiter_test.go`**: backoff timing, jitter bounds
-- **`fakebroker_test.go`**: deterministic fixture behavior
+- **`fixture_test.go`**: Phase 6 fixture test harness; tests TestFixtures() behavior, fixture discovery, JSON comparison (NEW)
+- **`fakebroker_test.go`**: deterministic fixture behavior; may use TestFixtures() to validate against testdata/fakebroker/ fixtures
 
 ---
+
+## Fixture Test Harness Impact
+
+### Changing ParsedListing Fields
+Any field added, removed, or renamed in `ParsedListing` requires:
+1. **Fixture JSON updates**: every `testdata/<sourceID>/fixture-N.json` must include/exclude the field
+2. **Parse() implementations**: each Scraper must extract the field (or omit if optional)
+3. **TestFixtures() re-run**: JSON round-trip comparison will fail until fixture JSON matches new shape
+4. **Fixture regeneration**: use a debug script or manual Parse() to generate corrected fixture JSON
+
+Example: Renaming `PriceCents` → `PriceUSD` breaks all fixture tests; TestFixtures() emits mismatches showing expected (old) vs actual (new) JSON.
+
+### Adding New Fixtures
+1. Save raw HTML to `testdata/<sourceID>/fixture-N.html`
+2. Run scraper's Parse() on that HTML, capture the resulting ParsedListing
+3. Marshal to JSON and save as `testdata/<sourceID>/fixture-N.json`
+4. TestFixtures() auto-discovers the pair and tests it on next run
+
+### Fixture Ownership
+- Fixtures live in `testdata/<sourceID>/` alongside test code
+- Scraper implementation authors are responsible for maintaining fixture pairs
+- Fixture JSON is the golden reference; Parse() implementation should match
 
 ## Known Drift / Future Work
 
@@ -211,3 +249,4 @@ All errors are non-fatal; run completes with error counts and Partial/Failed sta
 3. **Concurrency**: `Source.Concurrency` field defined but not enforced in Orchestrator; RateLimiter is single-threaded
 4. **Parser integration**: Orchestrator hard-depends on `Scraper.Parse()` returning `ParsedListing`; no pluggable parser delegation yet
 5. **Content-Type validation**: `RawFetch.ContentType` stored but not validated before Parse
+6. **Fixture testdata location**: currently `testdata/<sourceID>/` at repo root; may move under `foundation/scraper/` or per-source packages in future

@@ -33,6 +33,8 @@ type Storer interface {
     UpdateListing(ctx context.Context, l listing.Listing) error
     QueryListingByID(ctx context.Context, id string) (listing.Listing, error)
     QueryListingBySource(ctx context.Context, sourceID, sourceListingID string) (listing.Listing, error)
+    QueryListings(ctx context.Context, limit, offset int) ([]listing.Listing, error)
+    QueryListingsFilter(ctx context.Context, f listing.ListingFilter, limit, offset int) ([]listing.Listing, error)
     
     CreateSnapshot(ctx context.Context, snap listing.ListingSnapshot) (listing.ListingSnapshot, error)
     QuerySnapshotsByListing(ctx context.Context, listingID string) ([]listing.ListingSnapshot, error)
@@ -41,8 +43,26 @@ type Storer interface {
     QueryPriceChangesByListing(ctx context.Context, listingID string) ([]listing.PriceChange, error)
     
     CreateParseAttempt(ctx context.Context, pa listing.ParseAttempt) (listing.ParseAttempt, error)
-    QueryListings(ctx context.Context, limit, offset int) ([]listing.Listing, error)
     QueryEligibleRawFetchIDs(ctx context.Context, sourceID, parserVersion string) ([]int64, error)
+}
+```
+
+### listing.ListingFilter Type
+```go
+type ListingFilter struct {
+    AcresMin          *float64  // minimum acres
+    AcresMax          *float64  // maximum acres
+    PriceMin          *int64    // minimum price in cents
+    PriceMax          *int64    // maximum price in cents
+    Counties          []string  // county names (ANY clause)
+    PPAMin            *int64    // minimum price-per-acre in cents
+    PPAMax            *int64    // maximum price-per-acre in cents
+    PropertyType      *string   // matches attr_property_type
+    AttrWaterFrontage *bool     // nil = no constraint, true/false = must match
+    AttrOffGrid       *bool
+    AttrPower         *bool
+    AttrWell          *bool
+    AttrSeptic        *bool
 }
 ```
 
@@ -71,6 +91,7 @@ func NewStore(pool *pgxpool.Pool) *Store
 ### Migrations (Schema)
 - `storage/migrations/0001_core.sql` — tables: sources (scraper config), scrape_runs (execution history), raw_fetches (HTTP responses), parse_attempts (parsing outcomes)
 - `storage/migrations/0002_listings.sql` — tables: listings (canonical land records), listing_snapshots (timeline), price_changes (tracking), PostGIS geometry support
+- `storage/migrations/0003_geocode_cache.sql` — table: geocode_cache (address lookup cache with geometry, provider, confidence, raw response)
 
 ### SQL Queries (sqlc source, defines generated methods)
 - `storage/queries/source.sql` — CreateSource, UpdateSource, GetSourceByID, ListSources, CreateScrapeRun, UpdateScrapeRun, GetScrapeRunByID, ListScrapeRunsBySource, CreateRawFetch, GetRawFetchByID, ListRawFetchesByListing
@@ -84,7 +105,7 @@ func NewStore(pool *pgxpool.Pool) *Store
 
 ### Store Implementations
 - `storage/sourcedb/store.go` — implements source.Storer; methods CreateSource, UpdateSource, QuerySourceByID, QuerySources, CreateRun, UpdateRun, QueryRunByID, QueryRunsBySource, CreateRawFetch, QueryRawFetchByID, QueryRawFetchesByListing; includes type conversion helpers (pgx ⇄ domain types)
-- `storage/listingdb/store.go` — implements listing.Storer; methods CreateListing, UpdateListing, QueryListingByID, QueryListingBySource, CreateSnapshot, QuerySnapshotsByListing, CreatePriceChange, QueryPriceChangesByListing, CreateParseAttempt, QueryListings, QueryEligibleRawFetchIDs; includes JSON marshaling and geometry (WKT) helpers
+- `storage/listingdb/store.go` — implements listing.Storer; methods CreateListing, UpdateListing, QueryListingByID, QueryListingBySource, CreateSnapshot, QuerySnapshotsByListing, CreatePriceChange, QueryPriceChangesByListing, CreateParseAttempt, QueryListings, QueryListingsFilter (dynamic filter), QueryEligibleRawFetchIDs; includes JSON marshaling and geometry (WKT) helpers
 
 ### Configuration
 - `sqlc.yaml` — PostgreSQL engine, output package (storage/db), pgx/v5 sql_package, geometry type override (PostGIS geometry → pgtype.Text)
@@ -110,6 +131,20 @@ func NewStore(pool *pgxpool.Pool) *Store
 - **Implementation:** `storage/listingdb/store.go` — must implement all methods
 - **Callers:** `business/domain/listing/*` services that depend on listing.Storer
 - **Ripple:** Adding/removing a method requires corresponding .sql query changes and sqlc regeneration
+
+### ⚠ QueryListingsFilter() Method (storage/listingdb/store.go:312–441)
+**Dynamic SQL filtering with `listing.ListingFilter` struct — custom implementation, not sqlc-generated.**
+- Accepts `ListingFilter` with optional fields: `AcresMin/Max`, `PriceMin/Max`, `Counties`, `PPAMin/Max`, `PropertyType`, boolean attributes
+- Builds WHERE clause conditionally: `acres >= $N`, `price_cents >= $N`, `county = ANY($N)`, etc.
+- Scans results into `db.GetListingByIDRow` and converts to `listing.Listing` using `getByIDRowToListing()`
+- **Impact:** Changing `ListingFilter` struct requires updating the filter builder logic in lines 342–380
+- **Integration test:** `storage/listingdb/listingdb_integration_test.go:TestQueryListingsFilter` validates all filter combinations
+
+### ⚠ GeocodeCache Table (0003_geocode_cache.sql)
+**New caching table for address geocoding results.**
+- Columns: `id`, `address_key` (UNIQUE), `geom` (geometry), `precision`, `provider`, `confidence`, `raw` (jsonb), `cached_at`
+- Not yet integrated into code; ready for future geocoding service implementation
+- **Impact:** No breaking changes yet; storage/db/* will require regeneration once queries reference this table
 
 ### ⚠ Schema Changes (0001_core.sql, 0002_listings.sql)
 **Any table or column changes require coordinated updates across the stack.**
