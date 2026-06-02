@@ -8,19 +8,21 @@ import (
 	"time"
 
 	"github.com/cbrophy/land_trakker/business/domain/listing"
+	"github.com/cbrophy/land_trakker/foundation/geocode"
 	"github.com/cbrophy/land_trakker/foundation/scraper"
 	"github.com/jackc/pgx/v5"
 )
 
 // Core provides business logic for the listing domain.
 type Core struct {
-	storer listing.Storer
-	log    *slog.Logger
+	storer   listing.Storer
+	geocoder geocode.Geocoder
+	log      *slog.Logger
 }
 
-// NewCore constructs a Core with the given storer and logger.
-func NewCore(storer listing.Storer, log *slog.Logger) *Core {
-	return &Core{storer: storer, log: log}
+// NewCore constructs a Core with the given storer, geocoder, and logger.
+func NewCore(storer listing.Storer, geocoder geocode.Geocoder, log *slog.Logger) *Core {
+	return &Core{storer: storer, geocoder: geocoder, log: log}
 }
 
 // MissedRunConfig holds source-level thresholds for inactivation.
@@ -32,6 +34,7 @@ type MissedRunConfig struct {
 
 // UpsertFromParsed creates or updates a canonical listing from a parsed scrape result,
 // inserts a snapshot with field diff, and records any price change.
+// Geocoding is attempted if an address is available; daily cap exceeded results in nil geom.
 func (c *Core) UpsertFromParsed(ctx context.Context, pl scraper.ParsedListing, rawFetchID int64, now time.Time) (listing.Listing, listing.ListingSnapshot, error) {
 	existing, err := c.storer.QueryListingBySource(ctx, pl.SourceID, pl.SourceListingID)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
@@ -52,6 +55,7 @@ func (c *Core) UpsertFromParsed(ctx context.Context, pl scraper.ParsedListing, r
 			LastSeenAt:      now,
 		}
 		applyParsedFields(&l, pl)
+		c.geocodeAndApply(ctx, &l)
 
 		created, err := c.storer.CreateListing(ctx, l)
 		if err != nil {
@@ -85,6 +89,7 @@ func (c *Core) UpsertFromParsed(ctx context.Context, pl scraper.ParsedListing, r
 	existing.ConsecutiveMisses = 0
 	existing.LastSeenAt = now
 	applyParsedFields(&existing, pl)
+	c.geocodeAndApply(ctx, &existing)
 
 	if err := c.storer.UpdateListing(ctx, existing); err != nil {
 		return listing.Listing{}, listing.ListingSnapshot{}, fmt.Errorf("updating listing: %w", err)
@@ -233,6 +238,48 @@ func (c *Core) ApplyMissedRun(ctx context.Context, listingID string, cfg MissedR
 	}
 
 	return l, nil
+}
+
+// geocodeAndApply attempts to geocode a listing and applies the result to its Geom field.
+// If the daily limit is exceeded, Geom remains nil.
+// If another error occurs, it is logged as a warning and upsert continues.
+func (c *Core) geocodeAndApply(ctx context.Context, l *listing.Listing) {
+	// Skip if no address components are available
+	if l.AddressLine == nil && l.City == nil && l.County == nil && l.State == nil {
+		return
+	}
+
+	// Extract address components, using empty string for nil pointers
+	address := ""
+	if l.AddressLine != nil {
+		address = *l.AddressLine
+	}
+	city := ""
+	if l.City != nil {
+		city = *l.City
+	}
+	county := ""
+	if l.County != nil {
+		county = *l.County
+	}
+	state := ""
+	if l.State != nil {
+		state = *l.State
+	}
+
+	result, err := c.geocoder.Geocode(ctx, address, city, county, state)
+	if err != nil {
+		if errors.Is(err, geocode.ErrDailyLimitExceeded) {
+			// Daily limit reached: leave Geom as nil, no error
+			return
+		}
+		// Other error: log warning and continue without blocking upsert
+		c.log.Warn("geocoding failed", "address_line", address, "city", city, "county", county, "state", state, "err", err)
+		return
+	}
+
+	// Success: apply the geocoding result
+	l.Geom = &listing.Point{Lat: result.Lat, Lng: result.Lng}
 }
 
 // derivedStatus computes the new status for an existing listing given a parsed result.

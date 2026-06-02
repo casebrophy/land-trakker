@@ -2,6 +2,7 @@ package listingbus_test
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"sort"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/cbrophy/land_trakker/business/domain/listing"
 	"github.com/cbrophy/land_trakker/business/sdk/listingbus"
+	"github.com/cbrophy/land_trakker/foundation/geocode"
 	"github.com/cbrophy/land_trakker/foundation/scraper"
 	"github.com/jackc/pgx/v5"
 )
@@ -142,12 +144,71 @@ func itoa(n int) string {
 }
 
 // =============================================================================
+// mockGeocoder — test mock for geocode.Geocoder
+// =============================================================================
+
+// fakeSuccessGeocoder always returns a valid geocoding result.
+type fakeSuccessGeocoder struct{}
+
+func (fakeSuccessGeocoder) Geocode(ctx context.Context, address, city, county, state string) (geocode.Result, error) {
+	return geocode.Result{
+		Lat:        43.6150,
+		Lng:        -116.2023,
+		Precision:  geocode.PrecisionRooftop,
+		Provider:   "fake",
+		Confidence: 0.99,
+	}, nil
+}
+
+// fakeDailyCapGeocoder returns ErrDailyLimitExceeded.
+type fakeDailyCapGeocoder struct{}
+
+func (fakeDailyCapGeocoder) Geocode(ctx context.Context, address, city, county, state string) (geocode.Result, error) {
+	return geocode.Result{}, geocode.ErrDailyLimitExceeded
+}
+
+// fakeErrorGeocoder returns a non-cap error.
+type fakeErrorGeocoder struct{}
+
+func (fakeErrorGeocoder) Geocode(ctx context.Context, address, city, county, state string) (geocode.Result, error) {
+	return geocode.Result{}, errors.New("fake geocode error")
+}
+
+// trackingGeocoder records calls for verification.
+type trackingGeocoder struct {
+	calls []geocodeCall
+}
+
+type geocodeCall struct {
+	address string
+	city    string
+	county  string
+	state   string
+}
+
+func (t *trackingGeocoder) Geocode(ctx context.Context, address, city, county, state string) (geocode.Result, error) {
+	t.calls = append(t.calls, geocodeCall{address, city, county, state})
+	return geocode.Result{
+		Lat:        43.6150,
+		Lng:        -116.2023,
+		Precision:  geocode.PrecisionRooftop,
+		Provider:   "fake",
+		Confidence: 0.99,
+	}, nil
+}
+
+// =============================================================================
 // helpers
 // =============================================================================
 
 func newCore(store listing.Storer) *listingbus.Core {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return listingbus.NewCore(store, log)
+	return listingbus.NewCore(store, fakeSuccessGeocoder{}, log)
+}
+
+func newCoreWithGeocoder(store listing.Storer, geocoder geocode.Geocoder) *listingbus.Core {
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	return listingbus.NewCore(store, geocoder, log)
 }
 
 func baseParsed() scraper.ParsedListing {
@@ -468,5 +529,123 @@ func TestRecordParseAttempt(t *testing.T) {
 	}
 	if len(fs.parseAttempts) != 1 {
 		t.Errorf("expected 1 stored parse attempt, got %d", len(fs.parseAttempts))
+	}
+}
+
+// =============================================================================
+// Geocoding integration tests
+// =============================================================================
+
+func TestUpsertFromParsed_Geocoding_Success(t *testing.T) {
+	store := newFakeStore()
+	core := newCoreWithGeocoder(store, fakeSuccessGeocoder{})
+	now := time.Now()
+	pl := baseParsed()
+
+	// Add address to parsed listing
+	addressLine := "123 Main St"
+	city := "Boise"
+	county := "Ada"
+	state := "ID"
+	pl.Address = &scraper.Address{
+		Street: addressLine,
+		City:   city,
+		County: county,
+		State:  state,
+		Zip:    "83702",
+	}
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.Geom == nil {
+		t.Error("expected Geom to be populated after successful geocoding")
+	} else {
+		if got.Geom.Lat != 43.6150 {
+			t.Errorf("want Lat=43.6150, got %f", got.Geom.Lat)
+		}
+		if got.Geom.Lng != -116.2023 {
+			t.Errorf("want Lng=-116.2023, got %f", got.Geom.Lng)
+		}
+	}
+}
+
+func TestUpsertFromParsed_Geocoding_DailyCapExceeded(t *testing.T) {
+	store := newFakeStore()
+	core := newCoreWithGeocoder(store, fakeDailyCapGeocoder{})
+	now := time.Now()
+	pl := baseParsed()
+
+	// Add address
+	pl.Address = &scraper.Address{
+		Street: "123 Main St",
+		City:   "Boise",
+		County: "Ada",
+		State:  "ID",
+		Zip:    "83702",
+	}
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.Geom != nil {
+		t.Errorf("expected Geom to remain nil when daily cap exceeded, got %v", got.Geom)
+	}
+}
+
+func TestUpsertFromParsed_Geocoding_NullAddress(t *testing.T) {
+	store := newFakeStore()
+	tracker := &trackingGeocoder{}
+	core := newCoreWithGeocoder(store, tracker)
+	now := time.Now()
+	pl := baseParsed()
+
+	// No address set
+	pl.Address = nil
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.Geom != nil {
+		t.Errorf("expected Geom to remain nil for null address, got %v", got.Geom)
+	}
+
+	if len(tracker.calls) != 0 {
+		t.Errorf("expected no geocoding calls for null address, got %d calls", len(tracker.calls))
+	}
+}
+
+func TestUpsertFromParsed_Geocoding_Error(t *testing.T) {
+	store := newFakeStore()
+	core := newCoreWithGeocoder(store, fakeErrorGeocoder{})
+	now := time.Now()
+	pl := baseParsed()
+
+	// Add address
+	pl.Address = &scraper.Address{
+		Street: "123 Main St",
+		City:   "Boise",
+		County: "Ada",
+		State:  "ID",
+		Zip:    "83702",
+	}
+
+	got, _, err := core.UpsertFromParsed(context.Background(), pl, 1, now)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if got.Geom != nil {
+		t.Errorf("expected Geom to remain nil on geocoding error, got %v", got.Geom)
+	}
+	// Upsert should succeed despite geocoding error
+	if got.ID == "" {
+		t.Error("expected listing to be created despite geocoding error")
 	}
 }
