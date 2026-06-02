@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cbrophy/land_trakker/business/domain/listing"
@@ -302,6 +303,137 @@ func (s *Store) QueryListings(ctx context.Context, limit, offset int) ([]listing
 		l, err := getByIDRowToListing(r)
 		if err != nil {
 			return nil, fmt.Errorf("listingdb.QueryListings: convert: %w", err)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) QueryListingsFilter(ctx context.Context, f listing.ListingFilter, limit, offset int) ([]listing.Listing, error) {
+	const baseQ = `
+		SELECT
+		    id, source_id, source_listing_id, url, first_seen_at, last_seen_at,
+		    status, consecutive_misses, dismissed, dismissed_reason, saved,
+		    title, description, price_cents, acres, price_per_acre_cents,
+		    address_line, city, county, state, postal_code,
+		    ST_AsText(geom) AS geom_wkt,
+		    photos, broker_name, broker_phone, broker_email, posted_at, source_updated_at,
+		    attr_water_frontage, attr_off_grid, attr_road_access, attr_power, attr_well, attr_septic,
+		    attr_property_type, attrs_extra, attrs_extraction
+		FROM listings`
+
+	var sb strings.Builder
+	sb.WriteString(baseQ)
+
+	var args []any
+	argN := 1
+
+	addCond := func(cond string, val any) {
+		if argN == 1 {
+			sb.WriteString("\n\t\tWHERE ")
+		} else {
+			sb.WriteString("\n\t\t  AND ")
+		}
+		sb.WriteString(cond)
+		args = append(args, val)
+		argN++
+	}
+
+	if f.AcresMin != nil {
+		addCond(fmt.Sprintf("acres >= $%d", argN), *f.AcresMin)
+	}
+	if f.AcresMax != nil {
+		addCond(fmt.Sprintf("acres <= $%d", argN), *f.AcresMax)
+	}
+	if f.PriceMin != nil {
+		addCond(fmt.Sprintf("price_cents >= $%d", argN), *f.PriceMin)
+	}
+	if f.PriceMax != nil {
+		addCond(fmt.Sprintf("price_cents <= $%d", argN), *f.PriceMax)
+	}
+	if len(f.Counties) > 0 {
+		addCond(fmt.Sprintf("county = ANY($%d)", argN), f.Counties)
+	}
+	if f.PPAMin != nil {
+		addCond(fmt.Sprintf("price_per_acre_cents >= $%d", argN), *f.PPAMin)
+	}
+	if f.PPAMax != nil {
+		addCond(fmt.Sprintf("price_per_acre_cents <= $%d", argN), *f.PPAMax)
+	}
+	if f.PropertyType != nil {
+		addCond(fmt.Sprintf("attr_property_type = $%d", argN), *f.PropertyType)
+	}
+	if f.AttrWaterFrontage != nil {
+		addCond(fmt.Sprintf("attr_water_frontage = $%d", argN), *f.AttrWaterFrontage)
+	}
+	if f.AttrOffGrid != nil {
+		addCond(fmt.Sprintf("attr_off_grid = $%d", argN), *f.AttrOffGrid)
+	}
+	if f.AttrPower != nil {
+		addCond(fmt.Sprintf("attr_power = $%d", argN), *f.AttrPower)
+	}
+	if f.AttrWell != nil {
+		addCond(fmt.Sprintf("attr_well = $%d", argN), *f.AttrWell)
+	}
+	if f.AttrSeptic != nil {
+		addCond(fmt.Sprintf("attr_septic = $%d", argN), *f.AttrSeptic)
+	}
+
+	sb.WriteString(fmt.Sprintf("\n\t\tORDER BY first_seen_at DESC LIMIT $%d OFFSET $%d", argN, argN+1))
+	args = append(args, limit, offset)
+
+	rows, err := s.pool.Query(ctx, sb.String(), args...)
+	if err != nil {
+		return nil, fmt.Errorf("listingdb.QueryListingsFilter: %w", err)
+	}
+	defer rows.Close()
+	var out []listing.Listing
+	for rows.Next() {
+		var r db.GetListingByIDRow
+		if err := rows.Scan(
+			&r.ID,
+			&r.SourceID,
+			&r.SourceListingID,
+			&r.Url,
+			&r.FirstSeenAt,
+			&r.LastSeenAt,
+			&r.Status,
+			&r.ConsecutiveMisses,
+			&r.Dismissed,
+			&r.DismissedReason,
+			&r.Saved,
+			&r.Title,
+			&r.Description,
+			&r.PriceCents,
+			&r.Acres,
+			&r.PricePerAcreCents,
+			&r.AddressLine,
+			&r.City,
+			&r.County,
+			&r.State,
+			&r.PostalCode,
+			&r.GeomWkt,
+			&r.Photos,
+			&r.BrokerName,
+			&r.BrokerPhone,
+			&r.BrokerEmail,
+			&r.PostedAt,
+			&r.SourceUpdatedAt,
+			&r.AttrWaterFrontage,
+			&r.AttrOffGrid,
+			&r.AttrRoadAccess,
+			&r.AttrPower,
+			&r.AttrWell,
+			&r.AttrSeptic,
+			&r.AttrPropertyType,
+			&r.AttrsExtra,
+			&r.AttrsExtraction,
+		); err != nil {
+			return nil, fmt.Errorf("listingdb.QueryListingsFilter: scan: %w", err)
+		}
+		l, err := getByIDRowToListing(r)
+		if err != nil {
+			return nil, fmt.Errorf("listingdb.QueryListingsFilter: convert: %w", err)
 		}
 		out = append(out, l)
 	}
