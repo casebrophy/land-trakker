@@ -380,3 +380,54 @@ func TestListingsHandler_pagination_nextURL(t *testing.T) {
 		t.Fatalf("expected next-page link with offset=50 in body, got:\n%s", body)
 	}
 }
+
+func TestListingsHandler_withFilter_fulltext(t *testing.T) {
+	title := "Mountain Ranch"
+	q := &fakeQuerier{
+		listings: []listing.Listing{
+			{
+				ID:          "00000000-0000-0000-0000-000000000007",
+				SourceID:    "test",
+				Status:      listing.StatusActive,
+				Title:       &title,
+				FirstSeenAt: time.Now(),
+				LastSeenAt:  time.Now(),
+			},
+		},
+	}
+	h := web.ListingsHandler(q)
+
+	r := httptest.NewRequest(http.MethodGet, "/?q=mountain", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if q.lastFilter == nil {
+		t.Fatal("expected QueryListingsFilter to be called with non-nil filter")
+	}
+	if q.lastFilter.FullText == nil || *q.lastFilter.FullText != "mountain" {
+		t.Fatalf("expected FullText=mountain, got %v", q.lastFilter.FullText)
+	}
+}
+
+func TestListingsHandler_renderForm_searchInput(t *testing.T) {
+	q := &fakeQuerier{}
+	h := web.ListingsHandler(q)
+
+	r := httptest.NewRequest(http.MethodGet, "/?q=test+query", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `name="q"`) {
+		t.Fatalf("expected search input field in body")
+	}
+	if !strings.Contains(body, `value="test query"`) {
+		t.Fatalf("expected search value in body")
+	}
+}

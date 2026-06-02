@@ -70,6 +70,7 @@ type filterForm struct {
 	PriceMax     string
 	Counties     string
 	PropertyType string
+	Query        string
 	AttrWater    bool
 	AttrOffGrid  bool
 	AttrPower    bool
@@ -100,6 +101,9 @@ func parseFilter(r *http.Request) listing.ListingFilter {
 	q := r.URL.Query()
 	var f listing.ListingFilter
 
+	if v := q.Get("q"); v != "" {
+		f.FullText = &v
+	}
 	if v := q.Get("acres_min"); v != "" {
 		if n, err := strconv.ParseFloat(v, 64); err == nil {
 			f.AcresMin = &n
@@ -161,6 +165,7 @@ func isFilterEmpty(f listing.ListingFilter) bool {
 		len(f.Counties) == 0 &&
 		f.PPAMin == nil && f.PPAMax == nil &&
 		f.PropertyType == nil &&
+		f.FullText == nil &&
 		f.AttrWaterFrontage == nil &&
 		f.AttrOffGrid == nil &&
 		f.AttrPower == nil &&
@@ -171,6 +176,7 @@ func isFilterEmpty(f listing.ListingFilter) bool {
 func buildFilterForm(r *http.Request) filterForm {
 	q := r.URL.Query()
 	return filterForm{
+		Query:        q.Get("q"),
 		AcresMin:     q.Get("acres_min"),
 		AcresMax:     q.Get("acres_max"),
 		PriceMin:     q.Get("price_min"),

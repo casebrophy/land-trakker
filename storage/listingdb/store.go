@@ -467,6 +467,9 @@ func (s *Store) QueryListingsFilter(ctx context.Context, f listing.ListingFilter
 	if f.AttrSeptic != nil {
 		addCond(fmt.Sprintf("attr_septic = $%d", argN), *f.AttrSeptic)
 	}
+	if f.FullText != nil {
+		addCond(fmt.Sprintf("to_tsvector('english', coalesce(title,'') || ' ' || coalesce(description,'')) @@ plainto_tsquery('english', $%d)", argN), *f.FullText)
+	}
 
 	sb.WriteString(fmt.Sprintf("\n\t\tORDER BY first_seen_at DESC LIMIT $%d OFFSET $%d", argN, argN+1))
 	args = append(args, limit, offset)
