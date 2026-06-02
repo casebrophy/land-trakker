@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Land Trakker — Duplicates Review</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <nav class="bg-white shadow mb-4">
+        <div class="max-w-6xl mx-auto px-4 py-3 flex items-center justify-between">
+            <div class="flex items-center gap-6">
+                <a href="/" class="text-xl font-bold text-blue-700">Land Trakker</a>
+                <a href="/searches" class="text-sm text-gray-600 hover:text-blue-600">Saved Searches</a>
+                <a href="/digest" class="text-sm text-gray-600 hover:text-blue-600">Digest</a>
+                <a href="/duplicates" class="text-sm font-medium text-blue-600">Duplicates</a>
+            </div>
+            <a href="/logout" class="text-sm text-gray-600 hover:text-red-600">Logout</a>
+        </div>
+    </nav>
+
+    <div class="max-w-6xl mx-auto px-4 pb-8">
+        <div class="mb-4">
+            <h1 class="text-2xl font-bold text-gray-800">Duplicates Review Queue</h1>
+            <p class="text-sm text-gray-500 mt-0.5">Review and decide on {{.PairCount}} possible duplicate pairs</p>
+        </div>
+
+        {{if .Pairs}}
+        <div class="space-y-4">
+            {{range .Pairs}}
+            <div class="bg-white rounded shadow">
+                <div class="grid grid-cols-2 gap-4 p-4 border-b border-gray-200">
+                    <!-- Header with similarity score -->
+                    <div class="col-span-2">
+                        <div class="flex items-center justify-between">
+                            <div>
+                                <span class="text-xs px-2 py-0.5 bg-yellow-100 text-yellow-700 rounded-full font-medium">{{.ScorePercent}}% similar</span>
+                                {{if .Reasons}}
+                                <span class="text-xs text-gray-500 ml-2">Matched on: {{.Reasons}}</span>
+                                {{end}}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Two-column listing comparison -->
+                <div class="grid grid-cols-2 gap-4 p-4">
+                    <!-- Listing A -->
+                    <div class="border-r border-gray-200 pr-4">
+                        <h3 class="font-semibold text-gray-800 mb-2">
+                            <a href="/listings/{{.ListingAID}}" class="text-blue-700 hover:underline">{{.ListingATitle}}</a>
+                        </h3>
+                        <div class="text-sm text-gray-600 space-y-1">
+                            {{if .ListingAPrice}}<div><span class="font-medium">Price:</span> {{.ListingAPrice}}</div>{{end}}
+                            {{if .ListingAAddr}}<div><span class="font-medium">Address:</span> {{.ListingAAddr}}</div>{{end}}
+                        </div>
+                        {{if .ListingAURL}}
+                        <a href="{{.ListingAURL}}" target="_blank" rel="noopener"
+                           class="inline-block mt-2 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+                            View Source ↗
+                        </a>
+                        {{end}}
+                    </div>
+
+                    <!-- Listing B -->
+                    <div class="pl-4">
+                        <h3 class="font-semibold text-gray-800 mb-2">
+                            <a href="/listings/{{.ListingBID}}" class="text-blue-700 hover:underline">{{.ListingBTitle}}</a>
+                        </h3>
+                        <div class="text-sm text-gray-600 space-y-1">
+                            {{if .ListingBPrice}}<div><span class="font-medium">Price:</span> {{.ListingBPrice}}</div>{{end}}
+                            {{if .ListingBAddr}}<div><span class="font-medium">Address:</span> {{.ListingBAddr}}</div>{{end}}
+                        </div>
+                        {{if .ListingBURL}}
+                        <a href="{{.ListingBURL}}" target="_blank" rel="noopener"
+                           class="inline-block mt-2 px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50">
+                            View Source ↗
+                        </a>
+                        {{end}}
+                    </div>
+                </div>
+
+                <!-- Decision buttons -->
+                <div class="bg-gray-50 px-4 py-3 flex gap-2 justify-end border-t border-gray-200">
+                    <form method="POST" action="/duplicates/decision" class="inline">
+                        <input type="hidden" name="a_id" value="{{.ListingAID}}">
+                        <input type="hidden" name="b_id" value="{{.ListingBID}}">
+                        <input type="hidden" name="action" value="same">
+                        <button type="submit"
+                                class="px-4 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700">
+                            Mark as Same
+                        </button>
+                    </form>
+                    <form method="POST" action="/duplicates/decision" class="inline">
+                        <input type="hidden" name="a_id" value="{{.ListingAID}}">
+                        <input type="hidden" name="b_id" value="{{.ListingBID}}">
+                        <input type="hidden" name="action" value="different">
+                        <button type="submit"
+                                class="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700">
+                            Mark as Different
+                        </button>
+                    </form>
+                    <form method="POST" action="/duplicates/decision" class="inline">
+                        <input type="hidden" name="a_id" value="{{.ListingAID}}">
+                        <input type="hidden" name="b_id" value="{{.ListingBID}}">
+                        <input type="hidden" name="action" value="dismiss">
+                        <button type="submit"
+                                class="px-4 py-2 bg-gray-500 text-white text-sm rounded hover:bg-gray-600">
+                            Dismiss
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {{end}}
+        </div>
+        {{else}}
+        <div class="bg-white rounded shadow p-10 text-center text-gray-500">
+            <p class="text-lg font-medium mb-1">All reviewed!</p>
+            <p class="text-sm">No undecided duplicate pairs at this time. New pairs will appear as listings are scraped.</p>
+        </div>
+        {{end}}
+    </div>
+</body>
+</html>

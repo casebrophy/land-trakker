@@ -10,7 +10,7 @@ import (
 	"github.com/cbrophy/land_trakker/foundation/web"
 )
 
-func newRouter(cfg *config.Config, q web.ListingsQuerier, sc web.SearchCore) http.Handler {
+func newRouter(cfg *config.Config, q web.ListingsQuerier, sc web.SearchCore, dq web.DuplicatesQuerier) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
@@ -38,6 +38,10 @@ func newRouter(cfg *config.Config, q web.ListingsQuerier, sc web.SearchCore) htt
 		// Daily digest
 		r.Get("/digest", web.DigestHandler(sc, q))
 		r.Post("/digest/mark-seen", web.DigestMarkSeenHandler(sc))
+
+		// Duplicates review queue
+		r.Get("/duplicates", web.DuplicatesHandler(dq))
+		r.Post("/duplicates/decision", web.DuplicatesUpdateHandler(dq))
 	})
 
 	return r
