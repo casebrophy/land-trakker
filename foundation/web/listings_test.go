@@ -16,8 +16,10 @@ import (
 )
 
 type fakeQuerier struct {
-	listings  []listing.Listing
-	snapshots map[string][]listing.ListingSnapshot
+	listings        []listing.Listing
+	snapshots       map[string][]listing.ListingSnapshot
+	filteredResults []listing.Listing
+	lastFilter      *listing.ListingFilter
 }
 
 func (f *fakeQuerier) QueryListings(_ context.Context, limit, offset int) ([]listing.Listing, error) {
@@ -42,6 +44,22 @@ func (f *fakeQuerier) QueryListingByID(_ context.Context, id string) (listing.Li
 
 func (f *fakeQuerier) QuerySnapshotsByListing(_ context.Context, listingID string) ([]listing.ListingSnapshot, error) {
 	return f.snapshots[listingID], nil
+}
+
+func (f *fakeQuerier) QueryListingsFilter(_ context.Context, filter listing.ListingFilter, limit, offset int) ([]listing.Listing, error) {
+	f.lastFilter = &filter
+	src := f.filteredResults
+	if src == nil {
+		src = f.listings
+	}
+	end := offset + limit
+	if end > len(src) {
+		end = len(src)
+	}
+	if offset >= len(src) {
+		return nil, nil
+	}
+	return src[offset:end], nil
 }
 
 func TestListingsHandler_empty(t *testing.T) {
@@ -151,5 +169,129 @@ func TestListingDetailHandler_withSnapshots(t *testing.T) {
 	}
 	if !strings.Contains(body, "$49,000") {
 		t.Fatalf("expected body to contain snapshot price $49,000, got:\n%s", body)
+	}
+}
+
+func TestListingsHandler_withFilter_callsQueryListingsFilter(t *testing.T) {
+	title := "River Ranch 20 acres"
+	q := &fakeQuerier{
+		listings: []listing.Listing{
+			{
+				ID:          "00000000-0000-0000-0000-000000000003",
+				SourceID:    "test",
+				Status:      listing.StatusActive,
+				Title:       &title,
+				FirstSeenAt: time.Now(),
+				LastSeenAt:  time.Now(),
+			},
+		},
+	}
+	h := web.ListingsHandler(q)
+
+	r := httptest.NewRequest(http.MethodGet, "/?acres_min=10&counties=Ada", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if q.lastFilter == nil {
+		t.Fatal("expected QueryListingsFilter to be called with non-nil filter")
+	}
+	if q.lastFilter.AcresMin == nil || *q.lastFilter.AcresMin != 10.0 {
+		t.Fatalf("expected AcresMin=10, got %v", q.lastFilter.AcresMin)
+	}
+	if len(q.lastFilter.Counties) != 1 || q.lastFilter.Counties[0] != "Ada" {
+		t.Fatalf("expected Counties=[Ada], got %v", q.lastFilter.Counties)
+	}
+}
+
+func TestListingsHandler_htmx_returnsPartial(t *testing.T) {
+	title := "Hilltop 5 acres"
+	q := &fakeQuerier{
+		listings: []listing.Listing{
+			{
+				ID:          "00000000-0000-0000-0000-000000000004",
+				SourceID:    "test",
+				Status:      listing.StatusActive,
+				Title:       &title,
+				FirstSeenAt: time.Now(),
+				LastSeenAt:  time.Now(),
+			},
+		},
+	}
+	h := web.ListingsHandler(q)
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.Header.Set("HX-Request", "true")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	// Partial must contain the results table but NOT the full-page chrome.
+	if strings.Contains(body, "<!DOCTYPE html>") {
+		t.Fatal("HTMX response must not include full-page DOCTYPE")
+	}
+	if !strings.Contains(body, title) {
+		t.Fatalf("expected partial body to contain %q", title)
+	}
+}
+
+func TestListingsHandler_mapMarkers_renderedForGeocodedListings(t *testing.T) {
+	title := "Lakeside 15 acres"
+	lat, lng := 44.5, -116.0
+	q := &fakeQuerier{
+		listings: []listing.Listing{
+			{
+				ID:          "00000000-0000-0000-0000-000000000005",
+				SourceID:    "test",
+				Status:      listing.StatusActive,
+				Title:       &title,
+				Geom:        &listing.Point{Lat: lat, Lng: lng},
+				FirstSeenAt: time.Now(),
+				LastSeenAt:  time.Now(),
+			},
+		},
+	}
+	h := web.ListingsHandler(q)
+
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "44.5") {
+		t.Fatalf("expected map marker lat 44.5 in body, got:\n%s", body)
+	}
+	if !strings.Contains(body, "-116") {
+		t.Fatalf("expected map marker lng -116 in body, got:\n%s", body)
+	}
+}
+
+func TestListingsHandler_pagination_nextURL(t *testing.T) {
+	// Exactly limit listings → HasMore=true → NextURL present.
+	ls := make([]listing.Listing, 50)
+	for i := range ls {
+		ls[i] = listing.Listing{ID: fmt.Sprintf("id-%d", i), SourceID: "test", Status: listing.StatusActive, FirstSeenAt: time.Now(), LastSeenAt: time.Now()}
+	}
+	q := &fakeQuerier{listings: ls}
+	h := web.ListingsHandler(q)
+
+	r := httptest.NewRequest(http.MethodGet, "/?limit=50&offset=0", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "offset=50") {
+		t.Fatalf("expected next-page link with offset=50 in body, got:\n%s", body)
 	}
 }
