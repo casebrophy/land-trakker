@@ -80,7 +80,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         listen,
-		Handler:      newRouter(cfg, nil, nil, nil, nil, logCapture),
+		Handler:      newRouter(cfg, nil, nil, nil, nil, logCapture, nil, nil, nil),
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

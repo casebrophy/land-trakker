@@ -18,7 +18,7 @@ func newTestConfig() *config.Config {
 
 func TestRoutes_health(t *testing.T) {
 	lc := web.NewLogCapture(100)
-	r := newRouter(newTestConfig(), nil, nil, nil, nil, lc)
+	r := newRouter(newTestConfig(), nil, nil, nil, nil, lc, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -30,7 +30,7 @@ func TestRoutes_health(t *testing.T) {
 
 func TestRoutes_unauthenticated_redirectsToLogin(t *testing.T) {
 	lc := web.NewLogCapture(100)
-	r := newRouter(newTestConfig(), nil, nil, nil, nil, lc)
+	r := newRouter(newTestConfig(), nil, nil, nil, nil, lc, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -45,7 +45,7 @@ func TestRoutes_unauthenticated_redirectsToLogin(t *testing.T) {
 
 func TestRoutes_loginGet(t *testing.T) {
 	lc := web.NewLogCapture(100)
-	r := newRouter(newTestConfig(), nil, nil, nil, nil, lc)
+	r := newRouter(newTestConfig(), nil, nil, nil, nil, lc, nil, nil, nil)
 	req := httptest.NewRequest(http.MethodGet, "/login", nil)
 	w := httptest.NewRecorder()
 	r.ServeHTTP(w, req)
@@ -58,7 +58,7 @@ func TestRoutes_loginGet(t *testing.T) {
 func TestRoutes_authenticated_rootOK(t *testing.T) {
 	cfg := newTestConfig()
 	lc := web.NewLogCapture(100)
-	r := newRouter(cfg, nil, nil, nil, nil, lc)
+	r := newRouter(cfg, nil, nil, nil, nil, lc, nil, nil, nil)
 
 	// Pre-set a valid session cookie
 	ws := httptest.NewRecorder()

@@ -10,7 +10,7 @@ import (
 	"github.com/cbrophy/land_trakker/foundation/web"
 )
 
-func newRouter(cfg *config.Config, q web.ListingsQuerier, sc web.SearchCore, dq web.DuplicatesQuerier, hq web.HealthQuerier, lc *web.LogCapture) http.Handler {
+func newRouter(cfg *config.Config, q web.ListingsQuerier, sc web.SearchCore, dq web.DuplicatesQuerier, hq web.HealthQuerier, lc *web.LogCapture, asq web.AdminSourcesQuerier, asu web.AdminSourcesUpdater, bt web.BackfillTrigger) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
@@ -43,6 +43,11 @@ func newRouter(cfg *config.Config, q web.ListingsQuerier, sc web.SearchCore, dq 
 		// Duplicates review queue
 		r.Get("/duplicates", web.DuplicatesHandler(dq))
 		r.Post("/duplicates/decision", web.DuplicatesUpdateHandler(dq))
+
+		// Admin: per-source config and backfill
+		r.Get("/admin/sources", web.AdminSourcesHandler(asq))
+		r.Post("/admin/sources/{id}", web.AdminSourcesUpdateHandler(asu))
+		r.Post("/admin/sources/{id}/backfill", web.AdminSourcesBackfillHandler(bt))
 	})
 
 	return r
