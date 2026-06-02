@@ -10,7 +10,7 @@ import (
 	"github.com/cbrophy/land_trakker/foundation/web"
 )
 
-func newRouter(cfg *config.Config, q web.ListingsQuerier) http.Handler {
+func newRouter(cfg *config.Config, q web.ListingsQuerier, sc web.SearchCore) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Recoverer)
@@ -26,6 +26,18 @@ func newRouter(cfg *config.Config, q web.ListingsQuerier) http.Handler {
 		r.Use(web.RequireAuth(cfg.Server.SessionSecret))
 		r.Get("/", web.ListingsHandler(q))
 		r.Get("/listings/{id}", web.ListingDetailHandler(q))
+
+		// Saved searches CRUD
+		r.Get("/searches", web.SearchesHandler(sc))
+		r.Get("/searches/new", web.SearchesNewHandler())
+		r.Post("/searches", web.SearchesCreateHandler(sc))
+		r.Get("/searches/{id}/edit", web.SearchesEditHandler(sc))
+		r.Post("/searches/{id}", web.SearchesUpdateHandler(sc))
+		r.Post("/searches/{id}/delete", web.SearchesDeleteHandler(sc))
+
+		// Daily digest
+		r.Get("/digest", web.DigestHandler(sc, q))
+		r.Post("/digest/mark-seen", web.DigestMarkSeenHandler(sc))
 	})
 
 	return r
