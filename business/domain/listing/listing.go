@@ -167,6 +167,25 @@ type ListingFilter struct {
 	AttrSeptic        *bool
 }
 
+// Dedup reason constants for PossibleDuplicate.
+const (
+	DedupReasonGeo    = "geo"
+	DedupReasonAcres  = "acres"
+	DedupReasonPrice  = "price"
+	DedupReasonBroker = "broker"
+	DedupReasonTitle  = "title"
+)
+
+// PossibleDuplicate records a scored pair of listings that may be duplicates.
+type PossibleDuplicate struct {
+	ListingAID   string
+	ListingBID   string
+	Score        float64
+	Reasons      []string
+	DetectedAt   time.Time
+	UserDecision *string
+}
+
 // Storer defines the persistence contract for listing-domain objects.
 // Implementations live in storage/listingdb.
 type Storer interface {
@@ -189,4 +208,10 @@ type Storer interface {
 	// ParseAttempt operations
 	CreateParseAttempt(ctx context.Context, pa ParseAttempt) (ParseAttempt, error)
 	QueryEligibleRawFetchIDs(ctx context.Context, sourceID string, parserVersion string) ([]int64, error)
+
+	// Dedup operations
+	QueryListingsForDedup(ctx context.Context) ([]Listing, error)
+	UpsertPossibleDuplicate(ctx context.Context, pd PossibleDuplicate) error
+	QueryPossibleDuplicates(ctx context.Context, decision *string) ([]PossibleDuplicate, error)
+	UpdateDuplicateDecision(ctx context.Context, aID, bID string, decision string) error
 }

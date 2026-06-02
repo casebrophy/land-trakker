@@ -823,4 +823,148 @@ func jsonUnmarshal(b []byte) (map[string]any, error) {
 	return m, nil
 }
 
+func (s *Store) QueryListingsForDedup(ctx context.Context) ([]listing.Listing, error) {
+	const q = `
+		SELECT
+		    id, source_id, source_listing_id, url, first_seen_at, last_seen_at,
+		    status, consecutive_misses, dismissed, dismissed_reason, saved,
+		    title, description, price_cents, acres, price_per_acre_cents,
+		    address_line, city, county, state, postal_code,
+		    ST_AsText(geom) AS geom_wkt,
+		    photos, broker_name, broker_phone, broker_email, posted_at, source_updated_at,
+		    attr_water_frontage, attr_off_grid, attr_road_access, attr_power, attr_well, attr_septic,
+		    attr_property_type, attrs_extra, attrs_extraction
+		FROM listings
+		WHERE status IN ('active','stale')
+		ORDER BY id`
+	rows, err := s.pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("listingdb.QueryListingsForDedup: %w", err)
+	}
+	defer rows.Close()
+	var out []listing.Listing
+	for rows.Next() {
+		var r db.GetListingByIDRow
+		if err := rows.Scan(
+			&r.ID,
+			&r.SourceID,
+			&r.SourceListingID,
+			&r.Url,
+			&r.FirstSeenAt,
+			&r.LastSeenAt,
+			&r.Status,
+			&r.ConsecutiveMisses,
+			&r.Dismissed,
+			&r.DismissedReason,
+			&r.Saved,
+			&r.Title,
+			&r.Description,
+			&r.PriceCents,
+			&r.Acres,
+			&r.PricePerAcreCents,
+			&r.AddressLine,
+			&r.City,
+			&r.County,
+			&r.State,
+			&r.PostalCode,
+			&r.GeomWkt,
+			&r.Photos,
+			&r.BrokerName,
+			&r.BrokerPhone,
+			&r.BrokerEmail,
+			&r.PostedAt,
+			&r.SourceUpdatedAt,
+			&r.AttrWaterFrontage,
+			&r.AttrOffGrid,
+			&r.AttrRoadAccess,
+			&r.AttrPower,
+			&r.AttrWell,
+			&r.AttrSeptic,
+			&r.AttrPropertyType,
+			&r.AttrsExtra,
+			&r.AttrsExtraction,
+		); err != nil {
+			return nil, fmt.Errorf("listingdb.QueryListingsForDedup: scan: %w", err)
+		}
+		l, err := getByIDRowToListing(r)
+		if err != nil {
+			return nil, fmt.Errorf("listingdb.QueryListingsForDedup: convert: %w", err)
+		}
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpsertPossibleDuplicate(ctx context.Context, pd listing.PossibleDuplicate) error {
+	const q = `
+		INSERT INTO possible_duplicates (listing_a_id, listing_b_id, score, reasons, detected_at)
+		VALUES ($1::uuid, $2::uuid, $3, $4, $5)
+		ON CONFLICT (listing_a_id, listing_b_id) DO UPDATE SET
+		    score = EXCLUDED.score,
+		    reasons = EXCLUDED.reasons,
+		    detected_at = EXCLUDED.detected_at`
+	_, err := s.pool.Exec(ctx, q, pd.ListingAID, pd.ListingBID, pd.Score, pd.Reasons, timeToTZ(pd.DetectedAt))
+	if err != nil {
+		return fmt.Errorf("listingdb.UpsertPossibleDuplicate: %w", err)
+	}
+	return nil
+}
+
+func (s *Store) QueryPossibleDuplicates(ctx context.Context, decision *string) ([]listing.PossibleDuplicate, error) {
+	var q string
+	var args []any
+	if decision == nil {
+		q = `SELECT listing_a_id, listing_b_id, score, reasons, detected_at, user_decision
+		     FROM possible_duplicates
+		     WHERE user_decision IS NULL
+		     ORDER BY score DESC`
+	} else {
+		q = `SELECT listing_a_id, listing_b_id, score, reasons, detected_at, user_decision
+		     FROM possible_duplicates
+		     WHERE user_decision = $1
+		     ORDER BY score DESC`
+		args = append(args, *decision)
+	}
+	rows, err := s.pool.Query(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("listingdb.QueryPossibleDuplicates: %w", err)
+	}
+	defer rows.Close()
+	var out []listing.PossibleDuplicate
+	for rows.Next() {
+		var aID, bID pgtype.UUID
+		var score pgtype.Numeric
+		var reasons []string
+		var detectedAt pgtype.Timestamptz
+		var userDecision pgtype.Text
+		if err := rows.Scan(&aID, &bID, &score, &reasons, &detectedAt, &userDecision); err != nil {
+			return nil, fmt.Errorf("listingdb.QueryPossibleDuplicates: scan: %w", err)
+		}
+		scoreF := numericToFloat64Ptr(score)
+		var scoreVal float64
+		if scoreF != nil {
+			scoreVal = *scoreF
+		}
+		pd := listing.PossibleDuplicate{
+			ListingAID:   uuidToStr(aID.Bytes),
+			ListingBID:   uuidToStr(bID.Bytes),
+			Score:        scoreVal,
+			Reasons:      reasons,
+			DetectedAt:   detectedAt.Time,
+			UserDecision: textToStrPtr(userDecision),
+		}
+		out = append(out, pd)
+	}
+	return out, rows.Err()
+}
+
+func (s *Store) UpdateDuplicateDecision(ctx context.Context, aID, bID string, decision string) error {
+	const q = `UPDATE possible_duplicates SET user_decision = $1 WHERE listing_a_id = $2::uuid AND listing_b_id = $3::uuid`
+	_, err := s.pool.Exec(ctx, q, decision, aID, bID)
+	if err != nil {
+		return fmt.Errorf("listingdb.UpdateDuplicateDecision: %w", err)
+	}
+	return nil
+}
+
 var _ listing.Storer = (*Store)(nil)

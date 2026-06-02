@@ -3,6 +3,7 @@ package listingbus_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"sort"
@@ -21,11 +22,12 @@ import (
 // =============================================================================
 
 type fakeStore struct {
-	listings      map[string]listing.Listing          // id → listing
-	bySource      map[string]string                    // "sourceID:sourceListingID" → id
-	snapshots     map[string][]listing.ListingSnapshot // listingID → snaps (DESC)
+	listings      map[string]listing.Listing                  // id → listing
+	bySource      map[string]string                           // "sourceID:sourceListingID" → id
+	snapshots     map[string][]listing.ListingSnapshot        // listingID → snaps (DESC)
 	priceChanges  []listing.PriceChange
 	parseAttempts []listing.ParseAttempt
+	duplicates    map[string]listing.PossibleDuplicate        // "aID|bID" → PossibleDuplicate
 	nextSnapID    int64
 	nextListSeq   int
 	nextPAID      int64
@@ -37,6 +39,7 @@ func newFakeStore() *fakeStore {
 		listings:   make(map[string]listing.Listing),
 		bySource:   make(map[string]string),
 		snapshots:  make(map[string][]listing.ListingSnapshot),
+		duplicates: make(map[string]listing.PossibleDuplicate),
 		nextSnapID: 1,
 	}
 }
@@ -122,6 +125,49 @@ func (f *fakeStore) CreateParseAttempt(_ context.Context, pa listing.ParseAttemp
 
 func (f *fakeStore) QueryEligibleRawFetchIDs(_ context.Context, _, _ string) ([]int64, error) {
 	return f.eligibleIDs, nil
+}
+
+func (f *fakeStore) QueryListingsForDedup(_ context.Context) ([]listing.Listing, error) {
+	var out []listing.Listing
+	for _, l := range f.listings {
+		if l.Status == listing.StatusActive || l.Status == listing.StatusStale {
+			out = append(out, l)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) UpsertPossibleDuplicate(_ context.Context, pd listing.PossibleDuplicate) error {
+	key := pd.ListingAID + "|" + pd.ListingBID
+	f.duplicates[key] = pd
+	return nil
+}
+
+func (f *fakeStore) QueryPossibleDuplicates(_ context.Context, decision *string) ([]listing.PossibleDuplicate, error) {
+	var out []listing.PossibleDuplicate
+	for _, pd := range f.duplicates {
+		if decision == nil {
+			out = append(out, pd)
+			continue
+		}
+		if pd.UserDecision != nil && *pd.UserDecision == *decision {
+			out = append(out, pd)
+		} else if pd.UserDecision == nil && *decision == "" {
+			out = append(out, pd)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeStore) UpdateDuplicateDecision(_ context.Context, aID, bID string, decision string) error {
+	key := aID + "|" + bID
+	pd, ok := f.duplicates[key]
+	if !ok {
+		return fmt.Errorf("not found")
+	}
+	pd.UserDecision = &decision
+	f.duplicates[key] = pd
+	return nil
 }
 
 func (f *fakeStore) QueryListings(_ context.Context, limit, offset int) ([]listing.Listing, error) {
